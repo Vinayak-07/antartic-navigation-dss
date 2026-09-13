@@ -11,18 +11,24 @@ import json
 import math
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Dict, List, Mapping, Sequence, Tuple
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-DEFAULT_BOUNDS = {"south": -72.0, "north": -42.0, "west": 8.0, "east": 82.0}
-DEFAULT_SPACING_DEG = 4.0
-MAX_GRID_POINTS = 256
+DEFAULT_BOUNDS = {"south": -75.0, "north": -28.0, "west": 10.0, "east": 90.0}
+DEFAULT_SPACING_DEG = 2.0
+# Open-Meteo counts every grid location as one API call against a free-tier
+# budget of 600 calls/minute, so one full field build must stay below it.
+MAX_GRID_POINTS = 550
 REQUEST_BATCH_SIZE = 64
+PROVIDER_WORKERS = 4
+PROVIDER_RETRIES = 1
+PROVIDER_RETRY_DELAY = 15.0
 CACHE_TTL_SECONDS = 30 * 60
 
 
@@ -45,31 +51,47 @@ class WindGridRequest:
             raise ValueError("Wind longitude bounds must be ordered between -180 and 180.")
         if not (1.0 <= self.spacing <= 8.0):
             raise ValueError("Wind grid spacing must be between 1 and 8 degrees.")
-        if len(self.latitudes()) * len(self.longitudes()) > MAX_GRID_POINTS:
-            raise ValueError(f"Wind grid may contain at most {MAX_GRID_POINTS} points.")
         return self
 
-    def latitudes(self) -> List[float]:
-        # North-to-south is both explicit and the row order consumed by the renderer.
-        return _inclusive_axis(self.north, self.south, -self.spacing)
+    def effective_spacing(self) -> float:
+        """Raise the spacing just enough that the grid stays within the call budget.
 
-    def longitudes(self) -> List[float]:
-        return _inclusive_axis(self.west, self.east, self.spacing)
+        Large visible map extents and fine spacing would otherwise burst past the
+        provider's per-minute limit.  The coarsening is a pure function of the
+        request, so caching stays sound.
+        """
+        spacing = self.spacing
+        while spacing < 32.0 and self._point_count(spacing) > MAX_GRID_POINTS:
+            spacing = round(spacing + 0.25, 2)
+        return spacing
+
+    def _point_count(self, spacing: float) -> int:
+        latitude_intervals, longitude_intervals = self._interval_counts(spacing)
+        return (latitude_intervals + 1) * (longitude_intervals + 1)
+
+    def _interval_counts(self, spacing: float) -> Tuple[int, int]:
+        latitude_intervals = math.ceil(round(self.north - self.south, 9) / spacing)
+        longitude_intervals = math.ceil(round(self.east - self.west, 9) / spacing)
+        return max(1, latitude_intervals), max(1, longitude_intervals)
+
+    def grid_axes(self) -> Tuple[List[float], List[float], float, float]:
+        """Uniform latitude/longitude axes covering exactly the requested bounds.
+
+        The renderer (leaflet-velocity) derives every row as ``la1 - j*dy`` with a
+        single uniform ``dy`` and never reads ``la2``/``lo2``.  Uneven final rows
+        would distort interpolation, so rows are distributed evenly and the last
+        one lands exactly on the south/west bound.
+        """
+        spacing = self.effective_spacing()
+        latitude_intervals, longitude_intervals = self._interval_counts(spacing)
+        dy = (self.north - self.south) / latitude_intervals
+        dx = (self.east - self.west) / longitude_intervals
+        latitudes = [round(self.north - index * dy, 6) for index in range(latitude_intervals + 1)]
+        longitudes = [round(self.west + index * dx, 6) for index in range(longitude_intervals + 1)]
+        return latitudes, longitudes, dx, dy
 
     def cache_key(self) -> Tuple[float, float, float, float, float]:
         return tuple(round(value, 4) for value in (self.south, self.north, self.west, self.east, self.spacing))
-
-
-def _inclusive_axis(start: float, end: float, step: float) -> List[float]:
-    values: List[float] = []
-    value = start
-    epsilon = abs(step) / 1000.0
-    while (step > 0 and value <= end + epsilon) or (step < 0 and value >= end - epsilon):
-        values.append(round(value, 6))
-        value += step
-    if not math.isclose(values[-1], end, abs_tol=epsilon):
-        values.append(round(end, 6))
-    return values
 
 
 def meteorological_to_uv(speed_m_s: float, direction_deg: float) -> Tuple[float, float]:
@@ -85,26 +107,39 @@ class OpenMeteoWindProvider:
     model = "numerical weather forecast"
 
     def fetch(self, points: Sequence[Tuple[float, float]]) -> List[Mapping[str, object]]:
+        batches = [points[index:index + REQUEST_BATCH_SIZE] for index in range(0, len(points), REQUEST_BATCH_SIZE)]
         records: List[Mapping[str, object]] = []
-        for batch_start in range(0, len(points), REQUEST_BATCH_SIZE):
-            batch = points[batch_start:batch_start + REQUEST_BATCH_SIZE]
-            query = urlencode({
-                "latitude": ",".join(_format_coordinate(lat) for lat, _ in batch),
-                "longitude": ",".join(_format_coordinate(lon) for _, lon in batch),
-                "current": "wind_speed_10m,wind_direction_10m",
-                "wind_speed_unit": "ms",
-                "timezone": "UTC",
-            })
+        # Batches run concurrently; executor.map keeps the grid row order intact.
+        with ThreadPoolExecutor(max_workers=PROVIDER_WORKERS) as executor:
+            for batch_records in executor.map(self._fetch_batch, batches):
+                records.extend(batch_records)
+        return records
+
+    def _fetch_batch(self, batch: Sequence[Tuple[float, float]]) -> List[Mapping[str, object]]:
+        query = urlencode({
+            "latitude": ",".join(_format_coordinate(lat) for lat, _ in batch),
+            "longitude": ",".join(_format_coordinate(lon) for _, lon in batch),
+            "current": "wind_speed_10m,wind_direction_10m",
+            "wind_speed_unit": "ms",
+            "timezone": "UTC",
+        })
+        last_error: Exception | None = None
+        for attempt in range(PROVIDER_RETRIES + 1):
+            if attempt:
+                # A single long backoff lets a tripped per-minute window clear;
+                # rapid retries would only feed the provider's rate limiter.
+                time.sleep(PROVIDER_RETRY_DELAY)
             try:
                 with urlopen(f"{OPEN_METEO_URL}?{query}", timeout=20) as response:
                     payload = json.loads(response.read().decode("utf-8"))
-            except Exception as exc:  # Network errors must leave the rest of the simulation functional.
-                raise WindProviderError(f"Open-Meteo request failed: {exc}") from exc
+            except Exception as exc:  # Transient limits must not break the layer; retry, then degrade.
+                last_error = exc
+                continue
             response_records = payload if isinstance(payload, list) else [payload]
             if len(response_records) != len(batch):
                 raise WindProviderError("Open-Meteo returned an incomplete coordinate batch.")
-            records.extend(response_records)
-        return records
+            return response_records
+        raise WindProviderError(f"Open-Meteo request failed: {last_error}")
 
 
 def _format_coordinate(value: float) -> str:
@@ -140,8 +175,7 @@ class WindFieldService:
         return self._with_cache_metadata(field, cached_at=now, cached=False, stale=False)
 
     def _build_field(self, request: WindGridRequest) -> Dict[str, object]:
-        latitudes = request.latitudes()
-        longitudes = request.longitudes()
+        latitudes, longitudes, dx, dy = request.grid_axes()
         points = [(latitude, longitude) for latitude in latitudes for longitude in longitudes]
         records = self.provider.fetch(points)
         u_values: List[float] = []
@@ -170,7 +204,7 @@ class WindFieldService:
         common_header = {
             "la1": latitudes[0], "lo1": longitudes[0],
             "la2": latitudes[-1], "lo2": longitudes[-1],
-            "dx": request.spacing, "dy": request.spacing,
+            "dx": round(dx, 6), "dy": round(dy, 6),
             "nx": len(longitudes), "ny": len(latitudes),
             "refTime": reference_time, "forecastTime": 0,
         }
@@ -186,7 +220,8 @@ class WindFieldService:
                 "data_kind": "forecast-model",
                 "valid_time": reference_time,
                 "bounds": {"south": request.south, "north": request.north, "west": request.west, "east": request.east},
-                "grid_spacing_deg": request.spacing,
+                "grid_spacing_deg": {"lat": round(dy, 3), "lon": round(dx, 3)},
+                "requested_spacing_deg": request.spacing,
                 "nx": len(longitudes), "ny": len(latitudes),
                 "row_order": "north_to_south",
                 "units": "m/s",

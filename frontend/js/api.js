@@ -75,7 +75,15 @@ window.api = {
   predictIcebergs: () => window.api.request("/icebergs/predict", { method: "POST", body: JSON.stringify({}) }),
   optimizeRoutes: () => window.api.request("/routes/optimize", { method: "POST", body: JSON.stringify({}) }),
   getEnvironment: () => window.api.request("/environment"),
-  getWind: (refresh = false) => window.api.request(`/wind${refresh ? "?refresh=true" : ""}`),
+  getWind: (refresh = false, bounds = null) => {
+    const params = new URLSearchParams();
+    if (refresh) params.set("refresh", "true");
+    if (bounds) {
+      Object.entries(bounds).forEach(([key, value]) => params.set(key, Number(value).toFixed(6)));
+    }
+    const query = params.toString();
+    return window.api.request(`/wind${query ? `?${query}` : ""}`);
+  },
   createTrip: (payload) => window.api.request("/trips", { method: "POST", body: JSON.stringify(payload) }),
   listTrips: () => window.api.request("/trips"),
   getTrip: (tripId) => window.api.request(`/trips/${encodeURIComponent(tripId)}`),

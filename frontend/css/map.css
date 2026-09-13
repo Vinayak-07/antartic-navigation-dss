@@ -1,12 +1,13 @@
 #map {
   position: relative;
   width: 100%;
-  min-height: 640px;
+  min-height: 100vh;
   height: 100%;
-  border-radius: 12px;
-  border: 1px solid rgba(105, 210, 255, 0.3);
+  border-radius: 0;
+  border: 0;
   background: #0a1d2e;
   overflow: hidden;
+  touch-action: none;
 }
 
 #map.route-changed { animation: route-change-pulse 1.8s ease-out; }
@@ -73,9 +74,31 @@
   filter: drop-shadow(0 0 4px rgba(223, 248, 255, 0.9));
 }
 
-.marker-iceberg {
-  filter: drop-shadow(0 0 6px rgba(255, 107, 107, 0.7));
+.iceberg-marker { background: transparent; border: 0; }
+
+.iceberg-glyph {
+  display: block;
+  position: relative;
+  width: 18px;
+  height: 24px;
+  transform: rotate(45deg);
+  border: 2px solid #f2fbff;
+  border-radius: 5px 9px 5px 9px;
+  background: linear-gradient(145deg, #f7fdff 0 28%, var(--iceberg-color) 29% 100%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--iceberg-color) 28%, transparent), 0 0 10px color-mix(in srgb, var(--iceberg-color) 78%, transparent);
 }
+
+.iceberg-glyph i {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.8);
+  transform: rotate(-45deg);
+}
+
+.iceberg-selected .iceberg-glyph { outline: 2px solid #ffffff; outline-offset: 3px; }
 
 .iceberg-forecast-label {
   color: #eaf7ff;

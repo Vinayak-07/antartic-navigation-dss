@@ -4,7 +4,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const imagery = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: "Tiles © Esri", maxZoom: 18 });
   const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors", maxZoom: 18 });
-  const map = L.map("map", { zoomControl: true, attributionControl: true, layers: [imagery] }).setView([-62, 25], 4);
+  const operationalBounds = L.latLngBounds([[-75, 10], [-28, 90]]);
+  const map = L.map("map", {
+    zoomControl: false,
+    attributionControl: true,
+    layers: [imagery],
+    maxBounds: operationalBounds,
+    maxBoundsViscosity: 1.0,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false,
+    keyboard: false,
+    touchZoom: false,
+  }).fitBounds(operationalBounds, { padding: [8, 8], maxZoom: 4 });
+  map.dragging.disable();
+  map.boxZoom.disable();
+  map.doubleClickZoom.disable();
+  map.keyboard.disable();
+  map.scrollWheelZoom.disable();
+  map.touchZoom.disable();
+  const fixedCenter = map.getCenter();
+  const fixedZoom = map.getZoom();
+  map.on("moveend zoomend", () => {
+    if (map.getZoom() !== fixedZoom || !map.getCenter().equals(fixedCenter)) {
+      map.setView(fixedCenter, fixedZoom, { animate: false });
+    }
+  });
+  mapElement.addEventListener("wheel", (event) => event.preventDefault(), { passive: false });
+  mapElement.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
   const routeLayer = L.layerGroup().addTo(map);
   const icebergLayer = L.layerGroup().addTo(map);
   const seaIceLayer = L.layerGroup().addTo(map);
@@ -86,15 +114,36 @@ document.addEventListener("DOMContentLoaded", () => {
     const status = metadata.stale ? "stale cached field" : "cached forecast field";
     L.popup({ maxWidth: 290 })
       .setLatLng(latlng)
-      .setContent(`<div class="wind-inspector"><b>Wind field</b><br>${number(sample.speed, 2)} m/s from ${number(sample.direction, 0)}°<br>U: ${number(sample.u, 3)} m/s · V: ${number(sample.v, 3)} m/s<br><small>${metadata.source} · ${metadata.data_kind}<br>Valid: ${metadata.valid_time}<br>${status} · ${metadata.grid_spacing_deg}° grid</small></div>`)
+      .setContent(`<div class="wind-inspector"><b>Wind field</b><br>${number(sample.speed, 2)} m/s from ${number(sample.direction, 0)}°<br>U: ${number(sample.u, 3)} m/s · V: ${number(sample.v, 3)} m/s<br><small>${metadata.source} · ${metadata.data_kind}<br>Valid: ${metadata.valid_time}<br>${status} · ${number(metadata.grid_spacing_deg.lat, 2)}° lat / ${number(metadata.grid_spacing_deg.lon, 2)}° lon grid</small></div>`)
       .openOn(map);
   };
+  // The wind field must cover the map's actual visible extent, not just the
+  // operational rectangle: fitBounds leaves margins at the locked view, so
+  // particles would otherwise die inside the visible map.  The clamp keeps the
+  // request inside the documented Antarctic window the backend accepts.
+  const windRequestBounds = () => {
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    const visible = map.getBounds().pad(0.02);
+    return {
+      south: clamp(visible.getSouth(), -89, -20),
+      north: clamp(visible.getNorth(), -89, -20),
+      west: clamp(visible.getWest(), -180, 180),
+      east: clamp(visible.getEast(), -180, 180),
+      spacing: 2,
+    };
+  };
+  const windRequestSignature = (bounds) => Object.values(bounds).map((value) => Number(value).toFixed(2)).join(",");
+  let lastWindRequestSignature = null;
   const loadWindField = async (refresh = false) => {
     if (windLoading || !window.api || typeof window.api.getWind !== "function") return;
+    const bounds = windRequestBounds();
+    const signature = windRequestSignature(bounds);
+    if (!refresh && windField && signature === lastWindRequestSignature) return;
+    lastWindRequestSignature = signature;
     windLoading = true;
     setWindControlStatus("Loading wind forecast…");
     try {
-      const payload = await window.api.getWind(refresh);
+      const payload = await window.api.getWind(refresh, bounds);
       if (!validWindField(payload)) throw new Error("Wind response did not contain a valid U/V grid.");
       windField = payload;
       attachWindLayer();
@@ -178,7 +227,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       const riskRadius = Number(iceberg.risk_radius_m || 0);
       if (riskRadius > 0) L.circle(point, { radius: riskRadius, color, fillColor: color, fillOpacity: routeRisk.route_conflict ? 0.2 : 0.08, weight: routeRisk.route_conflict ? 2 : 1, className: "risk-zone" }).addTo(riskLayer);
-      const marker = L.circleMarker(point, { radius: selectedIcebergId === iceberg.id ? 10 : 7, color: selectedIcebergId === iceberg.id ? "#ffffff" : color, fillColor: color, fillOpacity: 1, weight: selectedIcebergId === iceberg.id ? 3 : 2, className: `${statusClass} ${selectedIcebergId === iceberg.id ? "iceberg-selected" : ""}` }).addTo(icebergLayer);
+      const marker = L.marker(point, {
+        icon: L.divIcon({
+          className: `iceberg-marker ${statusClass} ${selectedIcebergId === iceberg.id ? "iceberg-selected" : ""}`,
+          html: `<span class="iceberg-glyph" style="--iceberg-color:${color}"><i></i></span>`,
+          iconSize: selectedIcebergId === iceberg.id ? [28, 34] : [22, 28],
+          iconAnchor: selectedIcebergId === iceberg.id ? [14, 17] : [11, 14],
+        }),
+        title: `${iceberg.id} · ${status}`,
+      }).addTo(icebergLayer);
       marker.bindPopup(physicsPopup(iceberg), { maxWidth: 320 });
       marker.on("click", () => {
         selectedIcebergId = iceberg.id;
@@ -389,5 +446,12 @@ map.on('zoomend moveend', () => {
   createWindControl();
   window.mapController = { map, updateState };
   loadWindField();
-  window.setTimeout(() => map.invalidateSize(), 200);
+  window.addEventListener("resize", () => {
+    map.invalidateSize();
+    loadWindField();
+  });
+  window.setTimeout(() => {
+    map.invalidateSize();
+    loadWindField();
+  }, 200);
 });
