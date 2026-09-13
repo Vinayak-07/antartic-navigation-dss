@@ -131,3 +131,20 @@
   color: #d1d5db;
   border: 1px solid rgba(182, 195, 204, 0.55);
 }
+
+.wind-control {
+  width: min(245px, calc(100vw - 42px));
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(105, 210, 255, 0.35);
+  border-radius: 7px;
+  background: rgba(8, 21, 33, 0.94);
+  color: var(--text);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+
+.wind-control-title { color: var(--cyan); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.wind-control-status { min-height: 1.9em; margin: 0.2rem 0 0.4rem; color: var(--muted); font-size: 0.63rem; line-height: 1.35; overflow-wrap: anywhere; }
+.wind-status-error { color: var(--red); }
+.wind-control-actions { display: flex; gap: 0.35rem; }
+.wind-control-actions button { margin: 0; padding: 0.28rem 0.45rem; border-radius: 4px; font-size: 0.61rem; }
+.wind-inspector small { color: var(--muted); line-height: 1.5; }

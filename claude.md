@@ -1,7 +1,5 @@
 You are the lead software architect, scientific-simulation engineer, geospatial developer, numerical-modelling engineer, optimization engineer, backend engineer, and frontend visualization engineer working on my existing project:
 
-C:\Users\krish\Desktop\antarctic-navigation-dss
-
 Project purpose:
 
 This is an SIH 2026 prototype for problem statement 26059 associated with Antarctic sea-ice prediction, iceberg trajectory prediction, and navigation decision support for Indian Antarctic research-vessel operations.
@@ -963,22 +961,736 @@ PHASE 10 — WIND ANIMATION
 
 Add animated wind visualization.
 
-Possible techniques:
+The preferred implementation is a Windy.com / earth.nullschool-style
+particle-advection layer driven by real model-derived wind data.
+
+Possible visual techniques include:
 
 - particles
 - streamlines
 - moving vectors
 - flowing traces
 
-Wind movement must come from backend fields.
+The production/default implementation for the Leaflet map should use
+`leaflet-velocity` unless the existing architecture already contains
+an equivalent tested vector-field renderer.
 
-Direction should correspond to the actual simulated wind vector.
+Wind movement must come from an actual U/V vector field supplied by the
+backend wind-data pipeline.
 
-Speed should influence animation rate.
+Direction must correspond to the supplied wind vector.
 
-Do not make it purely decorative.
+Speed must influence particle movement speed and trail appearance.
 
-Click wind layer for technical information.
+Do not make wind animation purely decorative.
+
+Clicking the wind layer should expose technical information including
+wind speed, meteorological direction, U component, V component, source,
+valid time, and data status.
+
+IMPORTANT DISTINCTION:
+
+- The wind visualization may use an external model-derived forecast
+  source such as Open-Meteo.
+- The existing scientific simulation may still contain deterministic
+  synthetic fields for components that are not yet connected to real
+  external data.
+- Never silently present synthetic fields as observations.
+- Never silently present model forecasts as measured observations.
+- Label the provenance of the wind layer explicitly.
+
+============================================================
+PHASE 10A — WIND PARTICLE LAYER — LIVE IMPLEMENTATION CONTRACT
+============================================================
+
+Purpose:
+
+Implement a Windy.com-style animated wind particle layer for the
+Antarctic Sea-Ice / Iceberg Navigation Decision Support dashboard
+(SIH PS 26059, NCPOR/MoES).
+
+The goal is a scientifically connected, visually convincing wind layer
+with no paid service or API key anywhere in the pipeline.
+
+------------------------------------------------------------
+10A.1 — HOW THE EFFECT WORKS
+------------------------------------------------------------
+
+Do not re-derive or hand-roll the particle-advection renderer.
+
+The implementation must follow this model:
+
+1. Obtain U/V wind components on a latitude/longitude grid.
+2. Spawn many particles at positions across the visible wind field.
+3. On each animation step, sample U/V at the particle position.
+4. Advect the particle using the sampled vector.
+5. Fade the existing canvas rather than fully clearing it so trails form.
+6. Use wind-speed magnitude to influence trail appearance and/or color.
+7. Recycle particles when they die or leave the supported field.
+
+Use `leaflet-velocity` for this renderer because it already implements
+the required Leaflet canvas particle-advection behaviour.
+
+Do not write a second custom particle engine unless the existing
+plugin is proven incompatible with a project requirement and that
+decision is documented.
+
+------------------------------------------------------------
+10A.2 — LEAFLET / NEXT.JS REQUIREMENTS
+------------------------------------------------------------
+
+The project uses Next.js + Leaflet.
+
+Leaflet requires `window`, therefore the wind-capable map component
+must be client-only.
+
+Preferred architecture:
+
+`dynamic(() => import('./WindMap'), { ssr: false })`
+
+Import the relevant Leaflet and velocity-layer CSS in the client-side
+map path.
+
+`leaflet-velocity` attaches imperatively to a Leaflet map and is not a
+React component.
+
+Use one of these patterns:
+
+- a raw Leaflet `L.Map` ref, or
+- `useMap()` when the project already uses react-leaflet.
+
+Attach the velocity layer from a controlled `useEffect`.
+
+Do not recreate the velocity layer on every React render.
+
+Keep the wind layer lifecycle explicit:
+
+CREATE
+→
+ATTACH
+→
+UPDATE DATA
+→
+TOGGLE
+→
+DETACH/CLEAN UP
+
+Avoid duplicate canvas layers and event-listener leaks.
+
+------------------------------------------------------------
+10A.3 — DEPENDENCIES
+------------------------------------------------------------
+
+Install:
+
+```bash
+npm install leaflet leaflet-velocity
+npm install --save-dev @types/leaflet
+```
+
+`leaflet-velocity` does not provide complete official TypeScript types
+in many setups. Use a minimal local `.d.ts` declaration or a narrowly
+scoped `// @ts-ignore` only where required.
+
+Do not add a large ambient `any` declaration that hides unrelated type
+errors.
+
+For the optional Antarctic Polar Stereographic implementation, install:
+
+```bash
+npm install proj4 proj4leaflet
+```
+
+Do not add `proj4` / `proj4leaflet` merely to claim polar support.
+Use them only if the actual map architecture can support the required
+projection and tile source.
+
+------------------------------------------------------------
+10A.4 — ANTARCTIC MAP PROJECTION: CRITICAL
+------------------------------------------------------------
+
+Leaflet's default CRS is Web Mercator (EPSG:3857).
+
+That projection becomes increasingly distorted toward the poles, so
+Antarctica must not be treated like an ordinary mid-latitude web map.
+
+There are two accepted implementation paths.
+
+OPTION A — FAST / DEMO-SAFE:
+
+- Keep EPSG:3857.
+- Constrain `maxBounds` and default zoom so the map does not show the
+  entire polar cap as one distorted web-mercator scene.
+- Keep the camera focused on the operational Southern Ocean /
+  Antarctic coastal region.
+- Accept some polar stretching as a documented prototype limitation.
+
+This is preferred when changing the base map CRS would destabilize the
+existing map or its tile source.
+
+OPTION B — CORRECT POLAR PROJECTION:
+
+Use Antarctic Polar Stereographic (EPSG:3031) through `proj4` +
+`proj4leaflet`.
+
+Before switching:
+
+1. Inspect the existing base-map tile source.
+2. Verify that the base layer can actually be displayed in the chosen
+   CRS.
+3. Verify all geometry transforms used by routes, icebergs, coastlines,
+   wind grids, and hit-testing.
+4. Verify mouse-coordinate conversion.
+5. Verify bounds and zoom behaviour.
+6. Verify that existing route and land-protection logic still operates.
+
+Do not switch the entire application to EPSG:3031 blindly while keeping
+ordinary EPSG:3857 web tiles. A mismatched map CRS can make the map look
+broken even though the scientific coordinates are correct.
+
+Treat EPSG:3031 as the preferred stretch target for realistic polar
+mapping, not as permission to destabilize a working demo.
+
+Regardless of option A or B, document the chosen projection and its
+limitations.
+
+------------------------------------------------------------
+10A.5 — WIND DATA SOURCE
+------------------------------------------------------------
+
+Use Open-Meteo as the default no-key external wind source for the live
+wind visualization layer.
+
+Open-Meteo exposes forecast wind speed and wind direction, supports
+multiple comma-separated latitude/longitude coordinates, requires no
+API key for the non-commercial use case, and provides data under CC BY
+4.0 with attribution requirements.
+
+Primary API concept:
+
+`https://api.open-meteo.com/v1/forecast`
+
+Request wind variables appropriate to the chosen response mode.
+
+For the simplest current-condition implementation, the request may use:
+
+`current=wind_speed_10m,wind_direction_10m`
+
+For time-aware animation or forecast playback, prefer hourly fields so
+the wind layer can be tied to a valid simulation/forecast timestamp.
+
+Use:
+
+`wind_speed_unit=ms`
+
+Do not assume the API's default wind unit.
+
+The project must not require:
+
+- a paid weather API
+- a commercial token
+- a credit card
+- a hidden subscription
+- a frontend-exposed secret key
+
+Do not put provider keys in client code.
+
+------------------------------------------------------------
+10A.6 — GRID SAMPLING
+------------------------------------------------------------
+
+Define a configurable Antarctic/Southern Ocean bounding box based on the
+existing map operational area rather than hardcoding arbitrary global
+coverage.
+
+Start with a coarse grid around 2° spacing for the prototype.
+
+Build the sample points from:
+
+- latitude list
+- longitude list
+
+Batch the coordinate requests.
+
+Do not make one HTTP request per grid point.
+
+Open-Meteo accepts multiple coordinate pairs in one request. Keep the
+batch size configurable and use a conservative chunk size such as
+50–100 locations per request to avoid unnecessarily large requests.
+
+Represent the grid explicitly:
+
+- west longitude
+- east longitude
+- north latitude
+- south latitude
+- longitude spacing
+- latitude spacing
+- number of columns
+- number of rows
+- valid timestamp
+
+Do not infer grid geometry from array length at the frontend.
+
+------------------------------------------------------------
+10A.7 — SPEED/DIRECTION TO U/V
+------------------------------------------------------------
+
+Open-Meteo may provide meteorological wind speed and direction rather
+than direct U/V components.
+
+Convert them on the backend.
+
+Use the meteorological convention carefully:
+
+```js
+const rad = direction * Math.PI / 180;
+const u = -speed * Math.sin(rad);
+const v = -speed * Math.cos(rad);
+```
+
+The negative signs are important because meteorological wind direction
+describes the direction the wind is coming FROM, while U/V describe the
+vector component in the direction the air is moving.
+
+Do not perform a second conversion in the frontend.
+
+The frontend consumes already-normalized U/V field data.
+
+Validate the conversion with known cardinal cases:
+
+- 0° = wind from north, therefore motion toward south
+- 90° = wind from east, therefore motion toward west
+- 180° = wind from south, therefore motion toward north
+- 270° = wind from west, therefore motion toward east
+
+Add tests so a future refactor cannot silently reverse the animation.
+
+------------------------------------------------------------
+10A.8 — LEAFLET-VELOCITY DATA CONTRACT
+------------------------------------------------------------
+
+`leaflet-velocity` expects GRIB2-style metadata plus a flat row-major
+data array for the U and V components.
+
+The backend should emit two records:
+
+```json
+[
+  {
+    "header": {
+      "parameterCategory": 2,
+      "parameterNumber": 2,
+      "la1": 0,
+      "lo1": 0,
+      "la2": 0,
+      "lo2": 0,
+      "dx": 0,
+      "dy": 0,
+      "nx": 0,
+      "ny": 0,
+      "refTime": ""
+    },
+    "data": []
+  },
+  {
+    "header": {
+      "parameterCategory": 2,
+      "parameterNumber": 3,
+      "la1": 0,
+      "lo1": 0,
+      "la2": 0,
+      "lo2": 0,
+      "dx": 0,
+      "dy": 0,
+      "nx": 0,
+      "ny": 0,
+      "refTime": ""
+    },
+    "data": []
+  }
+]
+```
+
+The example values above are placeholders only.
+
+At runtime:
+
+- `parameterNumber: 2` = U component
+- `parameterNumber: 3` = V component
+- `nx` = points east-west
+- `ny` = rows north-south
+- `dx` = longitudinal spacing
+- `dy` = positive grid spacing magnitude
+- `la1` = northernmost latitude
+- `lo1` = westernmost longitude
+- `la2` = southernmost latitude
+- `lo2` = easternmost longitude
+- `data` = flat row-major component values
+
+CRITICAL ARRAY ORDER:
+
+The flattened data must match the header geometry.
+
+Prefer the convention expected by the velocity renderer:
+
+row 0 = northernmost latitude
+row 1 = next latitude south
+...
+last row = southernmost latitude
+
+Do not rely on an arbitrary `Array.flat()` over an ascending
+south-to-north latitude array.
+
+If the source grid is generated south-to-north, reverse the latitude
+row order before flattening.
+
+The implementation must verify the exact data contract against the
+installed `leaflet-velocity` package/sample data before finalizing the
+adapter. Do not assume an undocumented field name or scan order.
+
+Also verify that the produced field has:
+
+`data.length === nx * ny`
+
+for both U and V.
+
+------------------------------------------------------------
+10A.9 — BACKEND WIND ENDPOINT
+------------------------------------------------------------
+
+Create a dedicated backend/API boundary for wind data.
+
+Preferred endpoint:
+
+`GET /api/wind`
+
+Optional query parameters may include:
+
+- bounds
+- grid spacing
+- timestamp / forecast hour
+- provider/model selection
+- refresh flag
+
+The endpoint must:
+
+1. resolve the requested grid,
+2. fetch or retrieve cached external wind data,
+3. validate the response,
+4. convert speed/direction to U/V,
+5. assemble the velocity-layer grid,
+6. attach provenance metadata,
+7. return the field.
+
+Do not put the Open-Meteo HTTP request directly inside a React component.
+
+Do not duplicate U/V conversion in multiple modules.
+
+Recommended conceptual backend separation:
+
+`WindProvider`
+→
+`WindNormalizer`
+→
+`WindGridBuilder`
+→
+`WindCache`
+→
+`/api/wind`
+
+Keep the provider replaceable so a future NCPOR/IMD or other scientific
+dataset can replace Open-Meteo without changing the renderer.
+
+------------------------------------------------------------
+10A.10 — CACHING AND REFRESH
+------------------------------------------------------------
+
+Wind models are time-dependent, but there is no reason to refetch the
+same field on every page render or animation frame.
+
+Use server-side caching.
+
+Acceptable mechanisms include:
+
+- Next.js fetch revalidation where appropriate,
+- a controlled in-memory cache for the prototype,
+- an existing project cache if already present.
+
+Never cache unbounded arbitrary query combinations.
+
+Cache key should include the meaningful field parameters, such as:
+
+provider
++
+grid bounds
++
+grid spacing
++
+valid time
+
+Refresh on a sensible cadence aligned with the selected provider data.
+
+The particle animation itself must never trigger network requests.
+
+Manual refresh should be explicit and rate-limited.
+
+------------------------------------------------------------
+10A.11 — ATTACHING THE VELOCITY LAYER
+------------------------------------------------------------
+
+Preferred configuration baseline:
+
+```js
+L.velocityLayer({
+  displayValues: true,
+  data: windData,
+  velocityScale: 0.01,
+  particleAge: 90,
+  particleMultiplier: 1 / 300
+}).addTo(map);
+```
+
+These are starting values, not sacred constants.
+
+Tune visually after the pipeline is functioning.
+
+The two most important visual controls to tune first are:
+
+- `velocityScale`
+- `particleMultiplier`
+
+Also evaluate:
+
+- particle age
+- line width
+- opacity
+- color scale
+- display values
+- frame rate
+
+Do not maximize particle count just to make the screenshot look busy.
+
+The layer must remain legible alongside:
+
+- sea ice
+- icebergs
+- routes
+- vessel
+- risk zones
+
+------------------------------------------------------------
+10A.12 — WIND SPEED COLOR / LEGEND
+------------------------------------------------------------
+
+Provide a compact legend for wind speed.
+
+The color scale must be deterministic and documented.
+
+Do not use random colors.
+
+Do not imply that color is risk unless the legend explicitly says so.
+
+Wind-speed visualization and navigation-risk visualization are different
+semantic channels and must not share ambiguous color meanings.
+
+------------------------------------------------------------
+10A.13 — WIND LAYER TOGGLE
+------------------------------------------------------------
+
+Provide a compact on/off control.
+
+Requirements:
+
+- toggle must create at most one active wind layer
+- toggling off must remove/hide the layer cleanly
+- toggling on must reuse cached data when valid
+- toggling must not create duplicate canvases
+- hidden wind should not continue consuming unnecessary animation work
+  if the plugin/API permits clean suspension
+
+Do not make the wind toggle a giant dashboard card.
+
+------------------------------------------------------------
+10A.14 — MANUAL REFRESH
+------------------------------------------------------------
+
+Provide a compact manual refresh action for the wind layer.
+
+Refresh sequence:
+
+USER ACTION
+→
+invalidate stale cache entry where appropriate
+→
+GET /api/wind
+→
+validate field
+→
+replace velocity-layer data
+→
+update provenance/valid-time UI
+
+Do not rebuild the entire simulation trip merely because the visual wind
+layer was refreshed.
+
+------------------------------------------------------------
+10A.15 — ERROR HANDLING
+------------------------------------------------------------
+
+If the external wind provider fails:
+
+- do not crash the entire map
+- do not fabricate a "live" field
+- keep the last valid cached field if it is still within its declared
+  validity window
+- label the layer as stale when applicable
+- show a compact non-blocking error state
+
+If no valid field exists:
+
+- hide the velocity layer
+- report that wind data are unavailable
+- keep the rest of the navigation simulation functional
+
+Never silently replace missing live/model wind data with random vectors.
+
+------------------------------------------------------------
+10A.16 — WIND METADATA / TECHNICAL INSPECTOR
+------------------------------------------------------------
+
+When the user selects wind or opens the wind inspector, show at least:
+
+- source/provider
+- model if known
+- variable
+- wind speed
+- meteorological direction
+- U component
+- V component
+- valid timestamp
+- fetch timestamp
+- grid resolution
+- bounds
+- data status
+- whether the displayed field is cached/stale
+
+Normal mode should remain compact.
+
+Technical mode should expose the full metadata.
+
+------------------------------------------------------------
+10A.17 — WIND DATA AND THE SCIENTIFIC SIMULATION
+------------------------------------------------------------
+
+Do not automatically assume that the live wind visualization becomes
+the force field used by the iceberg RK45 simulation.
+
+Integration paths must be explicit.
+
+PHASE 1:
+
+Use the Open-Meteo field for the visual wind layer while preserving the
+existing deterministic simulation environment and physics.
+
+PHASE 2, ONLY AFTER VALIDATION:
+
+Introduce the provider through `EnvironmentProvider` so the simulation
+can consume a normalized wind field.
+
+PHASE 3:
+
+Use the same verified wind field for both:
+
+- visualization
+- iceberg/environment calculations
+
+when the spatial, temporal, and coordinate conventions have been
+validated.
+
+Until then, clearly label them as separate layers.
+
+This prevents a visually correct wind map from silently changing the
+physical trajectory model.
+
+------------------------------------------------------------
+10A.18 — PROJECTION / WIND GRID COORDINATE CONSISTENCY
+------------------------------------------------------------
+
+The wind API grid is defined in WGS84 latitude/longitude.
+
+The renderer may be operating in:
+
+- EPSG:3857, or
+- EPSG:3031
+
+The wind field's underlying geographic coordinates must remain
+unambiguous.
+
+If using EPSG:3031:
+
+- transform rendering coordinates through the map CRS,
+- do not alter the actual lat/lon values in the data contract,
+- ensure particle sampling and map hit-testing remain consistent.
+
+Never "fix" projection distortion by manually altering latitude or
+longitude values.
+
+------------------------------------------------------------
+10A.19 — PERFORMANCE
+------------------------------------------------------------
+
+Separate:
+
+WIND DATA REFRESH RATE
+
+from:
+
+PARTICLE RENDER FRAME RATE
+
+The backend/network layer updates at a controlled cadence.
+
+The canvas renderer animates smoothly between data fetches.
+
+Do not make an HTTP request for every frame.
+
+Do not rebuild the wind grid every frame.
+
+Do not call expensive scientific calculations from particle-render
+callbacks.
+
+Use the browser only for rendering and lightweight interpolation.
+
+------------------------------------------------------------
+10A.20 — DEFINITION OF DONE FOR WIND
+------------------------------------------------------------
+
+The wind layer is complete only when all are true:
+
+[ ] animated particles visibly move
+[ ] movement direction matches the supplied wind vector
+[ ] speed influences apparent movement
+[ ] U and V values come from a real backend data path
+[ ] Open-Meteo is reachable through the backend provider
+[ ] no paid API key is required
+[ ] no client-side secret is required
+[ ] response is cached
+[ ] the layer does not refetch every render/frame
+[ ] the field is converted into the velocity-layer data contract
+[ ] `data.length === nx * ny` for U and V
+[ ] north-to-south row ordering is correct
+[ ] meteorological direction convention is handled correctly
+[ ] wind-layer toggle works
+[ ] manual refresh works
+[ ] provider failure does not crash the map
+[ ] stale cached data are labeled
+[ ] technical inspector exposes provenance and valid time
+[ ] map remains usable over Antarctic latitudes
+[ ] no duplicate velocity canvas is created
+[ ] browser console has no wind-layer errors
+[ ] the limitation of the chosen CRS is documented
+[ ] the layer is visually subordinate to vessel / route / hazard layers
+  when those layers overlap
 
 ============================================================
 PHASE 11 — CURRENT ANIMATION
@@ -1772,11 +2484,20 @@ GET /api/icebergs
 POST /api/icebergs/predict
 POST /api/routes/optimize
 GET /api/environment
+GET /api/wind
 GET /api/health
 
-Use the actual backend scientific models.
+`GET /api/wind` is the dedicated boundary for the live/model-derived
+wind visualization field.
+
+The frontend must not call Open-Meteo directly.
+
+Use the actual backend scientific models and provider abstractions.
 
 Do not create duplicate equations inside API modules.
+
+Do not duplicate wind-direction-to-U/V conversion outside the canonical
+wind normalization module.
 
 ============================================================
 PHASE 42 — BACKEND SOURCE OF TRUTH
@@ -1817,11 +2538,21 @@ Benchmark:
 - one iceberg trajectory
 - multiple iceberg trajectories
 - sea-ice grid generation
+- wind grid generation
+- wind provider request + cache hit
+- velocity-layer data assembly
 - route optimization
 - full trip step
 - full trip replay
 
 Track execution times.
+
+For wind specifically, verify:
+
+- cached requests do not refetch unnecessarily
+- particle rendering does not perform network work
+- wind-layer toggling does not create duplicate canvases
+- wind-data refresh does not stall simulation playback
 
 Avoid unnecessary recomputation.
 
@@ -1835,6 +2566,20 @@ ENVIRONMENT
 - deterministic values
 - spatial continuity
 - temporal continuity
+
+WIND
+- provider response validation
+- speed/direction conversion to U/V
+- cardinal-direction conversion cases
+- grid bounds
+- grid spacing
+- nx/ny consistency
+- row ordering
+- `data.length === nx * ny`
+- cache behaviour
+- stale-data handling
+- provider failure handling
+- no duplicate layer creation
 
 SEA ICE
 - valid concentration
@@ -2118,6 +2863,8 @@ docs/
     frontend_architecture.md
     event_system.md
     api_contract.md
+    wind_layer.md
+    data_providers.md
 
 Document:
 
@@ -2130,6 +2877,13 @@ Document:
 - routing logic
 - risk logic
 - deterministic replay
+- wind particle rendering architecture
+- Open-Meteo provider usage and attribution
+- wind grid / U-V normalization
+- wind cache and refresh strategy
+- Antarctic map projection choice
+- EPSG:3857 limitations and/or EPSG:3031 implementation
+- data provenance and stale-data handling
 
 ============================================================
 PHASE 54 — SCIENTIFIC DISCLAIMER
@@ -2140,6 +2894,12 @@ Use exactly:
 "This prototype uses synthetic scientific simulation fields for development and demonstration. These values are not real-time observations and are not suitable for operational navigation."
 
 Display this in the application and documentation.
+
+Because the wind visualization can use an external model-derived
+forecast source, also display a separate provenance note making clear
+that model forecast data are not direct measurements.
+
+Never label forecast-model data as observed data.
 
 Never imply operational certification.
 
@@ -2166,10 +2926,36 @@ Use provider abstraction.
 Example concept:
 
 EnvironmentProvider
+WindProvider
 SeaIceProvider
 IcebergProvider
 
-Simulation layer should consume a common interface.
+For wind specifically, keep this chain replaceable:
+
+WindProvider
+→
+WindNormalizer
+→
+WindGridBuilder
+→
+WindCache
+→
+API
+→
+Leaflet Velocity Renderer
+
+The simulation layer should consume a common normalized interface.
+
+Do not couple the simulation engine or frontend directly to Open-Meteo.
+
+A future provider such as an NCPOR/IMD or other authoritative polar
+dataset should be able to replace Open-Meteo without rewriting:
+
+- the frontend renderer
+- wind-layer controls
+- route engine
+- vessel simulation
+- event system
 
 ============================================================
 PHASE 56 — FUTURE MACHINE LEARNING INTEGRATION
@@ -2429,16 +3215,37 @@ SIMULATION
 FORECAST
 OBSERVATION
 
-The current prototype uses synthetic simulation.
+The core prototype currently uses synthetic simulation where
+external scientific providers are not connected.
 
-Do not label simulated fields as:
+The wind visualization is an explicit exception when `/api/wind` is
+connected to the external Open-Meteo provider.
+
+Therefore distinguish:
+
+SIMULATION
+- deterministic internal fields used for the simulation engine
+
+FORECAST / MODEL-DERIVED WIND
+- external numerical-weather-model wind data used by the live wind layer
+
+OBSERVATION
+- measured or satellite-derived observations, only when actually
+  connected
+
+Do not label synthetic fields as:
 
 real-time
 observed
 live satellite
 operational
 
-unless actual external datasets are truly connected.
+Do not label a numerical forecast as an observation.
+
+Do not label a cached model field as "live" when it is stale.
+
+Every externally sourced wind field must expose provider/provenance and
+valid time.
 
 ============================================================
 PHASE 69 — ARCHITECTURAL EXTENSIBILITY
@@ -2447,6 +3254,9 @@ PHASE 69 — ARCHITECTURAL EXTENSIBILITY
 Keep these components replaceable:
 
 EnvironmentProvider
+WindProvider
+WindNormalizer
+WindGridBuilder
 SeaIceModel
 IcebergModel
 RouteOptimizer
@@ -2738,7 +3548,15 @@ ICEBERGS:
 
 ENVIRONMENT:
 
-[ ] wind animation
+[ ] deterministic simulation environment
+[ ] wind particle animation
+[ ] wind U/V field from backend
+[ ] wind speed/direction are correctly converted
+[ ] wind field row ordering is correct
+[ ] wind cache works
+[ ] wind refresh works
+[ ] wind provider failure is handled
+[ ] wind provenance is visible
 [ ] current animation
 [ ] waves
 [ ] sea-ice surface
@@ -2795,6 +3613,13 @@ Then:
 Verify:
 
 http://127.0.0.1:8000/api/health
+
+Also validate the wind endpoint directly:
+
+http://127.0.0.1:8000/api/wind
+
+Confirm that the response contains valid U/V records and metadata
+before testing the browser animation.
 
 Then perform complete browser validation.
 
@@ -2927,6 +3752,9 @@ Never claim completion without validation.
 Do not modify unrelated systems.
 
 Do not introduce unnecessary dependencies.
+
+For the wind layer, no paid API, commercial key, subscription, card,
+or client-side secret is allowed.
 
 Do not delete working scientific functionality.
 

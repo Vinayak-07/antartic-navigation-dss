@@ -1,28 +1,31 @@
-<<<<<<< HEAD
 # Antarctic Sea-Ice, Iceberg Trajectory and Navigation Decision Support System
 
 ## Project overview
 
-This project provides the initial scaffold for a voyage decision support system focused on:
+This project is a deterministic Antarctic voyage simulation prototype focused on:
 
 1. Sea-ice prediction
 2. Iceberg trajectory prediction
 3. Navigation route optimization
 
-The repository is intentionally structured for parallel development and mock-first integration. It does not implement production models, live data services, or operational navigation logic yet.
+The active trip engine combines a time-varying synthetic environment, sea-ice
+field, RK45 iceberg trajectories with coastal protection, route alternatives,
+risk assessment, vessel playback, and an interactive Leaflet map. It is a
+scientific demonstration, not an operational navigation system.
 
 ## Current status
 
-- TODO: Replace mock data with real scientific datasets.
-- TODO: Implement physical trajectory solver.
-- TODO: Implement sea-ice prediction pipeline.
-- TODO: Implement route optimization logic.
-- PLACEHOLDER: Frontend integration is mocked through API contracts.
-- PLANNED: Real environmental data ingestion from NOAA/NSIDC, Copernicus Marine, and ECMWF sources.
+- Deterministic trip creation, playback, seeking, replay, and event history.
+- RK45 iceberg drift and a synthetic Antarctic land/coast constraint.
+- Route alternatives and risk-informed rerouting.
+- Continuous interpolated sea-ice surface on the map.
+- Open-Meteo-derived U/V wind forecast particle layer with caching and
+  provenance. See `docs/wind_layer.md`.
 
 ## High-level architecture
 
-Data -> Preprocessing -> Environmental features -> sea-ice prediction -> iceberg physics -> risk grid -> route optimization -> decision support -> dashboard
+Environment -> sea ice -> iceberg physics -> risk -> route optimization -> vessel
+motion -> trip state -> map
 
 ## Operational scenario
 
@@ -33,15 +36,13 @@ Data -> Preprocessing -> Environmental features -> sea-ice prediction -> iceberg
 
 ## Strict project rule
 
-This project must not use external generative or prompt-based services. The design is based on physics-based modelling, numerical methods, geospatial computation, scientific datasets, graph algorithms, optimization, and statistical methods.
+The design is based on physics-based modelling, numerical methods, geospatial
+computation, scientific datasets, graph algorithms, optimization, and
+statistical methods.
 
 ## Folder layout
 
 See the project tree for the initial structure.
-
-## Mock-first workflow
-
-Frontend interactions are designed to communicate with API endpoints that return mock JSON following the eventual real schemas.
 
 ## API endpoints
 
@@ -52,14 +53,14 @@ Frontend interactions are designed to communicate with API endpoints that return
 - POST /api/icebergs/predict
 - POST /api/routes/optimize
 - GET /api/environment
+- GET /api/wind
+- POST /api/trips and trip-state/playback endpoints
 
 ## Requirements
 
-Please see requirements.txt for the initial dependency list. This is intentionally minimal and suitable for early project setup.
+Please see requirements.txt for the Python dependencies.
 
 ## Notes
 
-This repository is intentionally a scaffold. It is ready for parallel development but includes placeholders throughout the codebase.
-=======
-# antartic-navigation-dss
->>>>>>> 9330548f65a3d3bc6d0f8f116e4d61019a88a0ec
+Legacy single-purpose API modules remain for compatibility; an active trip's
+state is the source of truth for the map and simulation controls.

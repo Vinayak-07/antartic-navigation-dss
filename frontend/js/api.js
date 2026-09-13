@@ -75,6 +75,7 @@ window.api = {
   predictIcebergs: () => window.api.request("/icebergs/predict", { method: "POST", body: JSON.stringify({}) }),
   optimizeRoutes: () => window.api.request("/routes/optimize", { method: "POST", body: JSON.stringify({}) }),
   getEnvironment: () => window.api.request("/environment"),
+  getWind: (refresh = false) => window.api.request(`/wind${refresh ? "?refresh=true" : ""}`),
   createTrip: (payload) => window.api.request("/trips", { method: "POST", body: JSON.stringify(payload) }),
   listTrips: () => window.api.request("/trips"),
   getTrip: (tripId) => window.api.request(`/trips/${encodeURIComponent(tripId)}`),

@@ -18,10 +18,115 @@ document.addEventListener("DOMContentLoaded", () => {
   let seaIceData = null;
   let seaIceAnimationFrame = null;
   let seaIceTime = 0;
+  let windVelocityLayer = null;
+  let windField = null;
+  let windEnabled = true;
+  let windLoading = false;
+  let windControlStatus = null;
 
   const colorForRisk = (risk) => ({ low: "#6ee7b7", moderate: "#f5c76a", watch: "#ffb86b", high: "#ff6b6b" }[(risk || "moderate").toLowerCase()] || "#f5c76a");
   const vesselIcon = (heading) => L.divIcon({ className: "marker-vessel", html: `<div class="vessel-glyph" style="transform:rotate(${Number(heading) || 0}deg)"></div>`, iconSize: [24, 24], iconAnchor: [12, 12] });
   const number = (value, digits = 2) => value === undefined || value === null || Number.isNaN(Number(value)) ? "--" : Number(value).toFixed(digits);
+  const windMetadata = () => windField && windField.metadata;
+  const setWindControlStatus = (message, error = false) => {
+    if (!windControlStatus) return;
+    windControlStatus.textContent = message;
+    windControlStatus.classList.toggle("wind-status-error", error);
+  };
+  const validWindField = (payload) => {
+    const field = payload && payload.field;
+    const metadata = payload && payload.metadata;
+    if (!Array.isArray(field) || field.length !== 2 || !metadata) return false;
+    const header = field[0] && field[0].header;
+    const expectedLength = Number(header && header.nx) * Number(header && header.ny);
+    return Number.isFinite(expectedLength) && expectedLength > 0
+      && Array.isArray(field[0].data) && field[0].data.length === expectedLength
+      && Array.isArray(field[1].data) && field[1].data.length === expectedLength;
+  };
+  const removeWindLayer = () => {
+    if (windVelocityLayer) {
+      map.removeLayer(windVelocityLayer);
+      windVelocityLayer = null;
+    }
+  };
+  const attachWindLayer = () => {
+    removeWindLayer();
+    if (!windEnabled || !validWindField(windField) || typeof L.velocityLayer !== "function") return;
+    windVelocityLayer = L.velocityLayer({
+      data: windField.field,
+      displayValues: false,
+      velocityScale: 0.008,
+      particleAge: 90,
+      particleMultiplier: 1 / 450,
+      lineWidth: 1.2,
+      opacity: 0.72,
+      colorScale: ["#95d8ff", "#69d2ff", "#6ee7b7", "#f5c76a"],
+    }).addTo(map);
+  };
+  const sampleWind = (latlng) => {
+    if (!validWindField(windField)) return null;
+    const [uRecord, vRecord] = windField.field;
+    const header = uRecord.header;
+    const north = Number(header.la1); const south = Number(header.la2);
+    const west = Number(header.lo1); const east = Number(header.lo2);
+    if (latlng.lat > north || latlng.lat < south || latlng.lng < west || latlng.lng > east) return null;
+    const x = Math.max(0, Math.min(Number(header.nx) - 1, Math.round((latlng.lng - west) / (east - west) * (Number(header.nx) - 1))));
+    const y = Math.max(0, Math.min(Number(header.ny) - 1, Math.round((north - latlng.lat) / (north - south) * (Number(header.ny) - 1))));
+    const index = y * Number(header.nx) + x;
+    const u = Number(uRecord.data[index]); const v = Number(vRecord.data[index]);
+    if (!Number.isFinite(u) || !Number.isFinite(v)) return null;
+    const speed = Math.hypot(u, v);
+    const direction = (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;
+    return { u, v, speed, direction };
+  };
+  const showWindInspector = (latlng) => {
+    const metadata = windMetadata();
+    const sample = sampleWind(latlng);
+    if (!metadata || !sample) return;
+    const status = metadata.stale ? "stale cached field" : "cached forecast field";
+    L.popup({ maxWidth: 290 })
+      .setLatLng(latlng)
+      .setContent(`<div class="wind-inspector"><b>Wind field</b><br>${number(sample.speed, 2)} m/s from ${number(sample.direction, 0)}°<br>U: ${number(sample.u, 3)} m/s · V: ${number(sample.v, 3)} m/s<br><small>${metadata.source} · ${metadata.data_kind}<br>Valid: ${metadata.valid_time}<br>${status} · ${metadata.grid_spacing_deg}° grid</small></div>`)
+      .openOn(map);
+  };
+  const loadWindField = async (refresh = false) => {
+    if (windLoading || !window.api || typeof window.api.getWind !== "function") return;
+    windLoading = true;
+    setWindControlStatus("Loading wind forecast…");
+    try {
+      const payload = await window.api.getWind(refresh);
+      if (!validWindField(payload)) throw new Error("Wind response did not contain a valid U/V grid.");
+      windField = payload;
+      attachWindLayer();
+      const metadata = windMetadata();
+      setWindControlStatus(`${metadata.source} · ${metadata.stale ? "stale" : "forecast"} · ${metadata.valid_time}`);
+    } catch (error) {
+      removeWindLayer();
+      setWindControlStatus("Wind forecast unavailable", true);
+    } finally {
+      windLoading = false;
+    }
+  };
+  const createWindControl = () => {
+    const WindControl = L.Control.extend({
+      options: { position: "bottomleft" },
+      onAdd: () => {
+        const container = L.DomUtil.create("div", "leaflet-control wind-control");
+        container.innerHTML = `<div class="wind-control-title">Wind forecast</div><div class="wind-control-status">Loading…</div><div class="wind-control-actions"><button type="button" data-wind-toggle>Hide</button><button type="button" data-wind-refresh>Refresh</button></div>`;
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        windControlStatus = container.querySelector(".wind-control-status");
+        container.querySelector("[data-wind-toggle]").addEventListener("click", (event) => {
+          windEnabled = !windEnabled;
+          event.currentTarget.textContent = windEnabled ? "Hide" : "Show";
+          if (windEnabled) attachWindLayer(); else removeWindLayer();
+        });
+        container.querySelector("[data-wind-refresh]").addEventListener("click", () => loadWindField(true));
+        return container;
+      },
+    });
+    map.addControl(new WindControl());
+  };
   const physicsPopup = (iceberg) => {
     const physics = iceberg.physics_diagnostics || {};
     const routeRisk = iceberg.route_risk || {};
@@ -262,6 +367,10 @@ map.on('zoomend moveend', () => {
     }
   });
 
+  map.on("click", (event) => {
+    if (windEnabled && windField) showWindInspector(event.latlng);
+  });
+
   const updateState = (state) => {
     const vessel = state && state.vessel_state;
     if (vessel && vessel.lat !== undefined && vessel.lon !== undefined) {
@@ -277,6 +386,8 @@ map.on('zoomend moveend', () => {
   const baseLayers = { "Satellite Imagery": imagery, "Base Map": street };
   const overlays = { "Recommended / routes": routeLayer, "Icebergs": icebergLayer, "Sea-Ice": seaIceLayer, "Vessel": vesselLayer, "Risk zones": riskLayer };
   L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
+  createWindControl();
   window.mapController = { map, updateState };
+  loadWindField();
   window.setTimeout(() => map.invalidateSize(), 200);
 });

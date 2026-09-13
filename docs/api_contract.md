@@ -63,7 +63,22 @@ GET /api/environment
 
 Returns weather, ocean, and sea-ice environmental state.
 
+## Wind field
+
+GET /api/wind
+
+Optional query parameters: `south`, `north`, `west`, `east`, `spacing`, and
+`refresh`. The endpoint returns a two-record GRIB-style U/V vector field for
+the Leaflet particle renderer plus provenance metadata. Rows are always ordered
+north to south; both component arrays have exactly `nx * ny` values.
+
+The current provider is Open-Meteo's no-key numerical weather forecast. It is
+kept separate from the deterministic voyage environment until the two fields
+have been validated for shared scientific use. A cached response may be marked
+`stale` if a provider refresh fails; no replacement field is invented.
+
 ## Contract notes
 
-- TODO: Add strict schema validation when feature development begins.
-- PLACEHOLDER: Current responses are mock data aligned to future real schema requirements.
+- The trip endpoints are the canonical source for the voyage simulation state.
+- Several legacy single-purpose endpoints still return prototype examples and
+  should not be used as the state source for an active trip.

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.api import environment, icebergs, routes, sea_ice, trips, voyage
+from backend.api import environment, icebergs, routes, sea_ice, trips, voyage, wind
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -22,6 +22,7 @@ app.include_router(sea_ice.router, prefix="/api", tags=["sea-ice"])
 app.include_router(icebergs.router, prefix="/api", tags=["icebergs"])
 app.include_router(routes.router, prefix="/api", tags=["routes"])
 app.include_router(environment.router, prefix="/api", tags=["environment"])
+app.include_router(wind.router, prefix="/api", tags=["wind"])
 app.include_router(trips.router, prefix="/api", tags=["trips"])
 
 
