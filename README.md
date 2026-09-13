@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Antarctic Sea-Ice, Iceberg Trajectory and Navigation Decision Support System
 
 ## Project overview
@@ -59,3 +60,6 @@ Please see requirements.txt for the initial dependency list. This is intentional
 ## Notes
 
 This repository is intentionally a scaffold. It is ready for parallel development but includes placeholders throughout the codebase.
+=======
+# antartic-navigation-dss
+>>>>>>> 9330548f65a3d3bc6d0f8f116e4d61019a88a0ec
