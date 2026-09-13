@@ -1,0 +1,23 @@
+{
+  "voyage": {
+    "vessel": "RV Aurora",
+    "origin": "Cape Town",
+    "destination": "Bharati Station",
+    "departure_time": "2026-01-15T06:00:00Z",
+    "forecast_horizon_days": 10
+  },
+  "sea_ice": {
+    "risk_level": "moderate",
+    "confidence": 0.74
+  },
+  "icebergs": {
+    "detected_count": 2,
+    "high_risk_count": 1
+  },
+  "routes": {
+    "recommended": {
+      "name": "Recommended Route",
+      "score": 81.3
+    }
+  }
+}

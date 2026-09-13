@@ -1,0 +1,19 @@
+# Core web stack
+fastapi==0.115.0
+uvicorn==0.30.6
+pydantic==2.9.2
+
+# Scientific and numerical stack
+numpy==2.1.2
+pandas==2.2.2
+scipy==1.14.1
+shapely==2.0.6
+
+# Geospatial and data
+geojson==3.0.1
+
+# Basic testing
+pytest==8.3.3
+
+# Optional front-end integration placeholder
+python-dotenv==1.0.1

@@ -1,0 +1,133 @@
+#map {
+  position: relative;
+  width: 100%;
+  min-height: 640px;
+  height: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(105, 210, 255, 0.3);
+  background: #0a1d2e;
+  overflow: hidden;
+}
+
+#map.route-changed { animation: route-change-pulse 1.8s ease-out; }
+
+@keyframes route-change-pulse {
+  0% { box-shadow: inset 0 0 0 3px rgba(245, 199, 106, 0.95); }
+  100% { box-shadow: inset 0 0 0 0 rgba(245, 199, 106, 0); }
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #0a1d2e;
+  font: inherit;
+}
+
+.leaflet-control-layers {
+  background: rgba(8, 21, 33, 0.92);
+  border: 1px solid rgba(105, 210, 255, 0.25);
+  color: var(--text);
+}
+
+.leaflet-control-layers label {
+  color: var(--text);
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: rgba(8, 21, 33, 0.96);
+  color: var(--text);
+}
+
+.leaflet-popup-content {
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.route-label {
+  font-weight: 700;
+  color: #dff8f2;
+  background: rgba(9, 34, 48, 0.9);
+  border: 1px solid rgba(110, 231, 183, 0.5);
+  border-radius: 999px;
+  padding: 0.24rem 0.55rem;
+}
+
+.risk-zone {
+  fill-opacity: 0.16;
+  stroke-opacity: 0.7;
+  stroke-dasharray: 6 6;
+}
+
+.marker-vessel {
+  filter: drop-shadow(0 0 8px rgba(105, 210, 255, 0.9));
+}
+
+.vessel-glyph {
+  width: 0;
+  height: 0;
+  margin: 2px;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-bottom: 18px solid #69d2ff;
+  filter: drop-shadow(0 0 4px rgba(223, 248, 255, 0.9));
+}
+
+.marker-iceberg {
+  filter: drop-shadow(0 0 6px rgba(255, 107, 107, 0.7));
+}
+
+.iceberg-forecast-label {
+  color: #eaf7ff;
+  background: rgba(8, 21, 33, 0.88);
+  border: 1px solid rgba(245, 199, 106, 0.55);
+  border-radius: 4px;
+  padding: 0.12rem 0.28rem;
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+
+.iceberg-selected {
+  stroke-width: 3;
+  stroke: #ffffff;
+}
+
+.iceberg-grounded {
+  stroke-dasharray: 4 3;
+  filter: drop-shadow(0 0 6px rgba(182, 195, 204, 0.6));
+}
+
+.iceberg-coastal {
+  stroke-dasharray: 2 2;
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.6));
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
+.status-drifting {
+  background: rgba(110, 231, 183, 0.18);
+  color: #6ee7b7;
+  border: 1px solid rgba(110, 231, 183, 0.45);
+}
+
+.status-coastal {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+}
+
+.status-grounded {
+  background: rgba(182, 195, 204, 0.22);
+  color: #d1d5db;
+  border: 1px solid rgba(182, 195, 204, 0.55);
+}

@@ -1,0 +1,39 @@
+{
+  "status": "mock",
+  "source": "placeholder",
+  "metadata": {
+    "region": "Antarctic Ocean",
+    "time_coverage": "2026-01-15 to 2026-01-25",
+    "resolution_km": 25,
+    "schema_version": "0.1.0"
+  },
+  "grid": [
+    {
+      "cell_id": "grid-001",
+      "lat": -60.5,
+      "lon": 26.0,
+      "concentration": 0.68,
+      "risk_score": 0.64,
+      "forecast_horizon_days": 10,
+      "confidence": 0.74
+    },
+    {
+      "cell_id": "grid-002",
+      "lat": -61.8,
+      "lon": 27.1,
+      "concentration": 0.52,
+      "risk_score": 0.47,
+      "forecast_horizon_days": 10,
+      "confidence": 0.74
+    },
+    {
+      "cell_id": "grid-003",
+      "lat": -62.7,
+      "lon": 28.8,
+      "concentration": 0.79,
+      "risk_score": 0.81,
+      "forecast_horizon_days": 10,
+      "confidence": 0.71
+    }
+  ]
+}

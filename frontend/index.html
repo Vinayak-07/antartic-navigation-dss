@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NCPOR | Antarctic Navigation Decision Support System</title>
+    <link rel="preconnect" href="https://server.arcgisonline.com" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/map.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark">NCPOR</div>
+          <div>
+            <div class="brand-title">Antarctic Navigation Decision Support System</div>
+          </div>
+        </div>
+        <div class="status-group">
+          <div class="status-item">
+            <span>System Status</span>
+            <strong id="system-status">Checking data feed…</strong>
+          </div>
+          <div class="status-item">
+            <span>Data Status</span>
+            <strong id="data-status">Synthetic scientific simulation prototype</strong>
+          </div>
+          <div class="status-item">
+            <span>Last Update</span>
+            <strong id="last-update">--</strong>
+          </div>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <aside class="panel left-panel">
+          <div class="panel-header">
+            <h2>Voyage Configuration</h2>
+          </div>
+
+          <form id="voyage-form" class="voyage-form">
+            <label>
+              <span>Origin</span>
+              <select id="origin-select">
+                <option>Cape Town</option>
+              </select>
+            </label>
+            <label>
+              <span>Destination</span>
+              <select id="destination-select">
+                <option>Bharati Station</option>
+                <option>Maitri Station</option>
+              </select>
+            </label>
+            <label>
+              <span>Vessel</span>
+              <select id="vessel-select">
+                <option>RV Aurora</option>
+                <option>RV Penguin</option>
+              </select>
+            </label>
+            <label>
+              <span>Departure Date</span>
+              <input type="datetime-local" id="departure-time" value="2026-01-15T06:00" />
+            </label>
+            <label>
+              <span>Scenario</span>
+              <select id="scenario-select">
+                <option value="NORMAL">Normal</option>
+                <option value="HEAVY_ICE">Heavy Ice</option>
+                <option value="ICEBERG_ENCOUNTER">Iceberg Encounter</option>
+                <option value="SEVERE_WEATHER">Severe Weather</option>
+              </select>
+            </label>
+            <button type="submit" id="new-trip-button">New Trip</button>
+          </form>
+
+          <div class="sub-panel simulation-controls">
+            <div class="panel-header compact"><h3>Simulation Control</h3><span class="mode-badge" id="simulation-mode">LIVE</span></div>
+            <div class="control-row"><button type="button" id="play-button">Play</button><button type="button" id="pause-button">Pause</button><button type="button" id="reset-button">Reset</button></div>
+            <div class="control-row"><button type="button" id="step-back-button">Step Back</button><button type="button" id="step-forward-button">Step Forward</button><label class="speed-control"><span>Speed</span><select id="speed-select"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option><option value="5">5x</option><option value="10">10x</option><option value="50">50x</option></select></label></div>
+            <div class="timeline-wrap"><div class="timeline-labels"><span id="simulation-start">00:00</span><strong id="simulation-time">00:00</strong><span id="simulation-end">72:00</span></div><input id="simulation-timeline" type="range" min="0" max="72" step="1" value="0" /><div id="event-markers" class="event-markers"></div></div>
+            <p class="connection-message" id="trip-message">Create a trip to begin simulation.</p>
+          </div>
+
+          <div class="sub-panel trip-history-panel"><div class="panel-header compact"><h3>Trip History</h3></div><div id="trip-history" class="trip-history"><span>No trips recorded</span></div></div>
+
+          <div class="sub-panel"><div class="panel-header compact"><h3>Voyage State</h3></div><div class="metric-list small-gap"><div><span>Trip ID</span><strong id="trip-id">--</strong></div><div><span>Scenario</span><strong id="trip-scenario">--</strong></div><div><span>Phase</span><strong id="voyage-phase">--</strong></div><div><span>Position</span><strong id="vessel-position">--</strong></div><div><span>Speed / Heading</span><strong id="vessel-motion">--</strong></div><div><span>Fuel Remaining</span><strong id="fuel-remaining">--</strong></div><div><span>Navigation Risk</span><strong id="navigation-risk">--</strong></div></div></div>
+
+          <div class="sub-panel">
+            <div class="panel-header compact">
+              <h3>Environmental Conditions</h3>
+            </div>
+            <div class="stat-grid">
+              <div class="mini-stat">
+                <span>Wind</span>
+                <strong id="wind-speed">--</strong>
+              </div>
+              <div class="mini-stat">
+                <span>Current</span>
+                <strong id="current-speed">--</strong>
+              </div>
+              <div class="mini-stat">
+                <span>SST</span>
+                <strong id="sea-surface-temp">--</strong>
+              </div>
+              <div class="mini-stat">
+                <span>Wave Height</span>
+                <strong id="wave-height">--</strong>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="panel map-panel">
+          <div class="panel-header map-header">
+            <h2>Operational Map</h2>
+            <div class="map-legend">
+              <span><i class="legend-dot route-dot"></i> Optimized Route</span>
+              <span><i class="legend-dot iceberg-dot"></i> Icebergs</span>
+              <span><i class="legend-dot ice-dot"></i> Sea-Ice</span>
+            </div>
+          </div>
+          <div id="map" aria-label="Antarctic voyage map"></div>
+        </section>
+
+        <aside class="panel right-panel">
+          <div class="panel-header">
+            <h2>Sea-Ice Forecast</h2>
+          </div>
+          <div class="metric-list">
+            <div><span>Current SIC</span><strong id="current-sic">--</strong></div>
+            <div><span>Predicted SIC</span><strong id="predicted-sic">--</strong></div>
+            <div><span>Ice Risk</span><strong id="ice-risk">--</strong></div>
+            <div><span>Forecast Horizon</span><strong id="forecast-horizon-label">--</strong></div>
+            <div><span>Confidence</span><strong id="prediction-confidence">--</strong></div>
+            <div><span>Weather Risk</span><strong id="weather-risk">--</strong></div>
+          </div>
+
+          <div class="panel-header compact">
+            <h3>Iceberg Trajectory</h3>
+          </div>
+          <div class="metric-list small-gap">
+            <div><span>Tracked Icebergs</span><strong id="tracked-icebergs">--</strong></div>
+            <div><span>High Risk</span><strong id="high-risk-icebergs">--</strong></div>
+            <div><span>Nearest Iceberg</span><strong id="nearest-iceberg">--</strong></div>
+            <div><span>Prediction Horizon</span><strong id="trajectory-horizon">--</strong></div>
+            <div><span>Nearest Distance</span><strong id="nearest-distance">--</strong></div>
+          </div>
+
+          <div class="panel-header compact">
+            <h3>Selected Iceberg Physics</h3>
+          </div>
+          <div id="iceberg-details" class="iceberg-details">
+            <p>Select an iceberg marker to inspect its physics and forecast.</p>
+          </div>
+
+          <div class="panel-header compact">
+            <h3>Route Analysis</h3>
+          </div>
+          <div class="metric-list small-gap">
+            <div><span>Optimized Distance</span><strong id="optimized-distance">--</strong></div>
+            <div><span>Estimated Time</span><strong id="estimated-time">--</strong></div>
+            <div><span>Fuel Estimate</span><strong id="fuel-estimate">--</strong></div>
+            <div><span>Safety Score</span><strong id="safety-score">--</strong></div>
+            <div><span>Route Status</span><strong id="route-status">--</strong></div>
+            <div><span>Distance Travelled</span><strong id="distance-travelled">--</strong></div>
+          </div>
+        </aside>
+
+        <section class="panel sea-ice-panel">
+          <div class="panel-header compact">
+            <h3>Sea-Ice Concentration Legend</h3>
+          </div>
+          <div class="legend-scale">
+            <div><span class="swatch swatch-1"></span><span>0–10% Open Water</span></div>
+            <div><span class="swatch swatch-2"></span><span>10–30% Low</span></div>
+            <div><span class="swatch swatch-3"></span><span>30–60% Moderate</span></div>
+            <div><span class="swatch swatch-4"></span><span>60–80% High</span></div>
+            <div><span class="swatch swatch-5"></span><span>80–100% Very High</span></div>
+          </div>
+        </section>
+
+        <section class="panel iceberg-panel">
+          <div class="panel-header compact">
+            <h3>Route Comparison</h3>
+          </div>
+          <div class="route-list">
+            <div class="route-item" id="route-shortest">
+              <span>Shortest</span>
+              <strong>--</strong>
+            </div>
+            <div class="route-item optimized" id="route-optimized">
+              <span>Optimized</span>
+              <strong>--</strong>
+            </div>
+            <div class="route-item" id="route-conservative">
+              <span>Conservative</span>
+              <strong>--</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel route-panel">
+          <div class="panel-header compact">
+            <h3>Data Sources</h3>
+          </div>
+          <ul class="info-list">
+            <li>Prototype environmental feed</li>
+            <li>Sample sea-ice concentration grid</li>
+            <li>Mock iceberg observation set</li>
+            <li>Operational routing overlays</li>
+          </ul>
+        </section>
+
+        <section class="panel comparison-panel">
+          <div class="panel-header compact">
+            <h3>Model Pipeline</h3>
+          </div>
+          <ul class="info-list">
+            <li>Route generation</li>
+            <li>Iceberg risk screening</li>
+            <li>Environmental vector review</li>
+            <li>Operational decision support</li>
+          </ul>
+        </section>
+
+        <section class="panel alerts-panel">
+          <div class="panel-header compact">
+            <h3>Event Timeline</h3>
+          </div>
+          <ul class="alert-list" id="event-list"><li class="alert-level-normal">Create a trip to load backend events.</li></ul>
+        </section>
+      </main>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/map.js"></script>
+    <script src="/js/trips.js"></script>
+  </body>
+</html>

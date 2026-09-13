@@ -1,0 +1,38 @@
+{
+  "status": "mock",
+  "source": "placeholder",
+  "metadata": {
+    "region": "Antarctic Ocean",
+    "schema_version": "0.1.0"
+  },
+  "icebergs": [
+    {
+      "id": "A-204",
+      "lat": -50.4,
+      "lon": 20.6,
+      "size_class": "large",
+      "mass_t": 480000,
+      "draft_m": 28.0,
+      "freeboard_m": 8.0,
+      "risk_level": "high",
+      "current_velocity_m_s": {
+        "u": 0.18,
+        "v": 0.26
+      }
+    },
+    {
+      "id": "A-185",
+      "lat": -52.1,
+      "lon": 21.8,
+      "size_class": "medium",
+      "mass_t": 260000,
+      "draft_m": 18.0,
+      "freeboard_m": 5.5,
+      "risk_level": "moderate",
+      "current_velocity_m_s": {
+        "u": 0.11,
+        "v": 0.18
+      }
+    }
+  ]
+}
