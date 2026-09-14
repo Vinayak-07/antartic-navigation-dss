@@ -76,29 +76,45 @@
 
 .iceberg-marker { background: transparent; border: 0; }
 
+/* Two-tone iceberg glyph (phase 76.2): bright above-water tip in the
+   status/risk colour over a fainter submerged base, split by a waterline.
+   Rendered as inline SVG from map.js; sized 26x32 at the locked zoomed-out
+   operational view so it never gets lost against the sea-ice ramp. */
 .iceberg-glyph {
   display: block;
-  position: relative;
-  width: 18px;
-  height: 24px;
-  transform: rotate(45deg);
-  border: 2px solid #f2fbff;
-  border-radius: 5px 9px 5px 9px;
-  background: linear-gradient(145deg, #f7fdff 0 28%, var(--iceberg-color) 29% 100%);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--iceberg-color) 28%, transparent), 0 0 10px color-mix(in srgb, var(--iceberg-color) 78%, transparent);
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--iceberg-color) 70%, transparent));
 }
 
-.iceberg-glyph i {
-  position: absolute;
-  left: 3px;
-  bottom: 3px;
-  width: 8px;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.8);
-  transform: rotate(-45deg);
+.iceberg-glyph svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
-.iceberg-selected .iceberg-glyph { outline: 2px solid #ffffff; outline-offset: 3px; }
+.iceberg-tip {
+  fill: var(--iceberg-color);
+  stroke: #f2fbff;
+  stroke-width: 1.6;
+}
+
+.iceberg-base {
+  fill: color-mix(in srgb, var(--iceberg-color) 32%, #0a1d2e);
+  opacity: 0.85;
+  stroke: rgba(242, 251, 255, 0.55);
+  stroke-width: 1;
+}
+
+.iceberg-waterline {
+  stroke: rgba(234, 247, 255, 0.95);
+  stroke-width: 1.4;
+}
+
+.iceberg-selected .iceberg-glyph {
+  filter: drop-shadow(0 0 5px #ffffff) drop-shadow(0 0 10px rgba(255, 255, 255, 0.65));
+}
 
 .iceberg-forecast-label {
   color: #eaf7ff;
@@ -116,13 +132,142 @@
 }
 
 .iceberg-grounded {
-  stroke-dasharray: 4 3;
   filter: drop-shadow(0 0 6px rgba(182, 195, 204, 0.6));
 }
 
+.iceberg-grounded .iceberg-tip { stroke-dasharray: 4 3; }
+
 .iceberg-coastal {
-  stroke-dasharray: 2 2;
   filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.6));
+}
+
+.iceberg-coastal .iceberg-tip { stroke-dasharray: 2 2; }
+
+/* Stacked-label badge (phase 76.1): when several route/forecast labels land
+   on the same ~20px screen cell, one badge replaces all of them and its
+   popup lists what was suppressed. */
+.label-cluster {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.66rem;
+  color: #0a1d2e;
+  background: #eaf7ff;
+  border: 1px solid rgba(105, 210, 255, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(105, 210, 255, 0.5);
+  cursor: pointer;
+}
+
+.label-cluster-popup ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
+.label-cluster-popup li { margin: 0.15rem 0; }
+
+/* Always-visible map legend (phase 76.2), docked bottom-right away from
+   the wind control (bottom-left). The voyage/forecast panels are fixed
+   overlays that reach the bottom corners of the viewport, so the legend
+   is offset inward by the panel width to stay readable. */
+.leaflet-bottom.leaflet-right .map-legend {
+  margin-right: calc(var(--panel-width, 320px) + var(--panel-gap, 1rem) + 1.2rem);
+  margin-bottom: 0.9rem;
+}
+
+.map-legend {
+  width: 215px;
+  padding: 0.5rem 0.65rem 0.6rem;
+  border: 1px solid rgba(105, 210, 255, 0.35);
+  border-radius: 7px;
+  background: rgba(8, 21, 33, 0.94);
+  color: var(--text);
+  font-size: 0.66rem;
+  line-height: 1.5;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+
+.map-legend-title {
+  margin-bottom: 0.2rem;
+  color: var(--cyan);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.map-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.18rem;
+}
+
+.map-legend-row:last-child { margin-top: 0.1rem; }
+
+.legend-swatch {
+  flex: none;
+  width: 18px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.legend-vessel {
+  width: 0;
+  height: 0;
+  background: transparent;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 12px solid #69d2ff;
+  border-radius: 0;
+  filter: drop-shadow(0 0 3px rgba(105, 210, 255, 0.9));
+}
+
+.legend-iceberg {
+  background: linear-gradient(180deg, #6ee7b7 0 45%, rgba(110, 231, 183, 0.3) 45% 100%);
+  border: 1px solid rgba(242, 251, 255, 0.85);
+}
+
+.legend-iceberg-coastal {
+  background: linear-gradient(180deg, #38bdf8 0 45%, rgba(56, 189, 248, 0.3) 45% 100%);
+}
+
+.legend-iceberg-grounded {
+  background: linear-gradient(180deg, #b6c3cc 0 45%, rgba(182, 195, 204, 0.3) 45% 100%);
+}
+
+.legend-route-recommended {
+  height: 0;
+  background: transparent;
+  border-top: 3px solid #6ee7b7;
+  border-radius: 0;
+}
+
+.legend-route-shortest {
+  height: 0;
+  background: transparent;
+  border-top: 2px dashed #f8d66d;
+  border-radius: 0;
+}
+
+.legend-route-conservative {
+  height: 0;
+  background: transparent;
+  border-top: 2px dashed #7ec8ff;
+  border-radius: 0;
+}
+
+.legend-glacier {
+  background: #bfe9ff;
+  border: 1px solid rgba(234, 247, 255, 0.85);
+  clip-path: polygon(0% 100%, 12% 40%, 28% 62%, 48% 18%, 66% 52%, 76% 34%, 88% 62%, 100% 100%);
+}
+
+.map-legend-ramp { margin-top: 0.35rem; }
+
+.legend-sea-ice-ramp {
+  display: block;
+  height: 10px;
+  border: 1px solid rgba(182, 195, 204, 0.4);
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(10, 29, 46, 0.15), #2a5476, #6094ba, #96c4e4, #cfe9ff, #ffffff);
 }
 
 .status-badge {
@@ -153,6 +298,40 @@
   background: rgba(182, 195, 204, 0.22);
   color: #d1d5db;
   border: 1px solid rgba(182, 195, 204, 0.55);
+}
+
+/* ---------------------------------------------------------------
+   Glacier markers (see /js/glaciers.js)
+   Distinct silhouette from the iceberg diamond so the two never
+   get confused on the map at a glance: a jagged ice-tongue glyph
+   in the same icy palette as the rest of the UI. Sizing is driven
+   by a --glacier-scale custom property set per-marker from JS so
+   markers can grow/shrink with zoom level (see scaleForZoom()).
+------------------------------------------------------------------ */
+.glacier-marker {
+  background: transparent;
+  border: 0;
+  filter: drop-shadow(0 0 6px rgba(105, 210, 255, 0.55));
+}
+
+.glacier-glyph {
+  display: block;
+  width: calc(24px * var(--glacier-scale, 1));
+  height: calc(24px * var(--glacier-scale, 1));
+}
+
+.glacier-marker.glacier-selected .glacier-glyph {
+  filter: drop-shadow(0 0 4px #ffffff);
+}
+
+.glacier-label {
+  color: #eaf7ff;
+  background: rgba(8, 21, 33, 0.88);
+  border: 1px solid rgba(105, 210, 255, 0.5);
+  border-radius: 4px;
+  padding: 0.12rem 0.28rem;
+  font-size: 0.62rem;
+  white-space: nowrap;
 }
 
 .wind-control {

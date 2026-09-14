@@ -16,6 +16,15 @@
   --amber: #f5c76a;
   --red: #ff6b6b;
   --shadow: rgba(0, 0, 0, 0.25);
+
+  /* Fluid sizing tokens for the floating panels + topbar.
+     clamp(min, preferred, max) lets these scale with the viewport
+     instead of staying locked to a fixed px width. */
+  --panel-width: clamp(248px, 21vw, 320px);
+  --panel-gap: clamp(0.6rem, 1.6vw, 1rem);
+  --topbar-pad-y: clamp(0.35rem, 0.9vw, 0.6rem);
+  --topbar-pad-x: clamp(0.5rem, 1.6vw, 1rem);
+  --status-item-min: clamp(108px, 12vw, 140px);
 }
 
 html, body {
@@ -43,8 +52,8 @@ button, input, select {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 3px;
-  padding: 5px 5px 5px;
+  gap: clamp(0.4rem, 1.2vw, 0.9rem);
+  padding: var(--topbar-pad-y) var(--topbar-pad-x);
   background: rgba(8, 18, 29, 0.9);
   border-bottom: 1px solid var(--panel-border);
   box-shadow: 0 16px 24px rgba(0, 0, 0, 0.12);
@@ -54,38 +63,44 @@ button, input, select {
   display: flex;
   align-items: center;
   gap: 0.9rem;
+  min-width: 0;
 }
 
 .brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 74px;
-  padding: 0.45rem 0.8rem;
+  min-width: 62px;
+  padding: 0.4rem 0.7rem;
   border: 1px solid rgba(105, 210, 255, 0.5);
   background: rgba(105, 210, 255, 0.08);
   color: var(--cyan);
   border-radius: 6px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
+  font-size: clamp(0.72rem, 1vw, 0.85rem);
+  flex: none;
 }
 
 .brand-title {
-  font-size: clamp(1.1rem, 1.8vw, 1.6rem);
+  font-size: clamp(0.92rem, 1.6vw, 1.6rem);
   font-weight: 700;
   letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-group {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.75rem;
+  gap: clamp(0.4rem, 1vw, 0.75rem);
 }
 
 .status-item {
-  min-width: 140px;
-  padding: 0.55rem 0.7rem;
+  min-width: var(--status-item-min);
+  padding: clamp(0.4rem, 0.9vw, 0.55rem) clamp(0.5rem, 1vw, 0.7rem);
   border: 1px solid var(--panel-border);
   background: rgba(8, 21, 33, 0.8);
   border-radius: 8px;
@@ -146,18 +161,35 @@ body,
   z-index: 1100;
   max-height: calc(100vh - 2rem);
   overflow: auto;
+  transition: transform 0.28s ease, opacity 0.28s ease;
 }
 
 .left-panel {
-  top: 5.5rem;
-  left: 1rem;
-  width: 310px;
+  top: calc(3.6rem + var(--panel-gap) * 2);
+  left: var(--panel-gap);
+  width: var(--panel-width);
 }
 
 .right-panel {
-  top: 5.5rem;
-  right: 1rem;
-  width: 320px;
+  top: calc(3.6rem + var(--panel-gap) * 2);
+  right: var(--panel-gap);
+  width: var(--panel-width);
+}
+
+/* Collapsed state driven by panel-toggle.js — slides the panel
+   fully off-canvas instead of just hiding it, so the map behind it
+   is reachable and the toggle button remains the only thing docked
+   at the edge. */
+.left-panel.collapsed {
+  transform: translateX(calc(-1 * (var(--panel-width) + var(--panel-gap) + 2rem)));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.right-panel.collapsed {
+  transform: translateX(calc(var(--panel-width) + var(--panel-gap) + 2rem));
+  opacity: 0;
+  pointer-events: none;
 }
 
 .sea-ice-panel,
@@ -190,7 +222,7 @@ body,
   border-radius: 12px;
   box-shadow: 0 12px 28px var(--shadow);
   backdrop-filter: blur(8px);
-  padding: 1rem;
+  padding: clamp(0.75rem, 1.6vw, 1rem);
 }
 
 .left-panel {
@@ -235,7 +267,7 @@ body,
 .panel-header h2,
 .panel-header h3 {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: clamp(0.82rem, 1vw, 0.98rem);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--cyan);
@@ -272,6 +304,7 @@ body,
 .route-dot { background: #6ee7b7; }
 .iceberg-dot { background: #ff7d6b; }
 .ice-dot { background: #6fb4ff; }
+.glacier-dot { background: #bfe9ff; }
 
 .voyage-form {
   display: flex;
@@ -453,6 +486,68 @@ button:disabled, input:disabled, select:disabled { opacity: 0.45; cursor: not-al
 .trajectory-table td { border-bottom: 1px solid rgba(138, 160, 179, 0.14); padding: 0.18rem 0; }
 .trajectory-table td:last-child { text-align: right; color: var(--text); }
 
+/* ---------------------------------------------------------------
+   Panel show/hide toggle buttons
+   Docked to the edge of each sidebar, independent of the panel's
+   own scroll/collapse state so they're always reachable.
+------------------------------------------------------------------ */
+.panel-toggle {
+  position: fixed;
+  z-index: 1300;
+  top: calc(4.2rem + var(--panel-gap) * 2 + 34px);
+  width: 30px;
+  height: 44px;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cyan);
+  background: rgba(8, 21, 33, 0.92);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 8px 18px var(--shadow);
+  cursor: pointer;
+  transition: left 0.28s ease, right 0.28s ease, background 0.15s ease;
+}
+
+.panel-toggle:hover {
+  background: rgba(18, 40, 58, 0.96);
+}
+
+.panel-toggle svg {
+  transition: transform 0.28s ease;
+}
+
+.panel-toggle-left {
+  left: calc(var(--panel-gap) + var(--panel-width));
+  border-radius: 0 8px 8px 0;
+  border-left: 0;
+}
+
+.panel-toggle-left.is-collapsed {
+  left: 0;
+  border-radius: 0 8px 8px 0;
+}
+
+.panel-toggle-left.is-collapsed svg {
+  transform: rotate(180deg);
+}
+
+.panel-toggle-right {
+  right: calc(var(--panel-gap) + var(--panel-width));
+  border-radius: 8px 0 0 8px;
+  border-right: 0;
+}
+
+.panel-toggle-right.is-collapsed {
+  right: 0;
+  border-radius: 8px 0 0 8px;
+}
+
+.panel-toggle-right.is-collapsed svg {
+  transform: rotate(180deg);
+}
+
 @media (max-width: 1200px) {
   .dashboard {
     grid-template-columns: 1fr 1.5fr;
@@ -465,6 +560,11 @@ button:disabled, input:disabled, select:disabled { opacity: 0.45; cursor: not-al
 }
 
 @media (max-width: 860px) {
+  :root {
+    --panel-width: min(88vw, 320px);
+    --panel-gap: 0.6rem;
+  }
+
   .topbar {
     flex-direction: column;
     align-items: flex-start;
@@ -490,4 +590,58 @@ button:disabled, input:disabled, select:disabled { opacity: 0.45; cursor: not-al
   .map-panel {
     min-height: 480px;
   }
+
+  /* On narrow viewports the sidebars would otherwise cover most of
+     the map, so they start collapsed; panel-toggle.js reads this
+     via the .start-collapsed class on <body> at load. */
+  .left-panel,
+  .right-panel {
+    top: calc(6.4rem + var(--panel-gap));
+  }
+
+  .panel-toggle {
+    top: calc(6.4rem + var(--panel-gap) + 34px);
+  }
+}
+
+@media (max-width: 520px) {
+  :root {
+    --panel-width: 100vw;
+  }
+
+  .left-panel,
+  .right-panel {
+    left: 0;
+    right: 0;
+    width: 100vw;
+    border-radius: 0;
+    max-height: calc(100vh - 8rem);
+  }
+
+  .left-panel.collapsed {
+    transform: translateY(-120%);
+  }
+
+  .right-panel.collapsed {
+    transform: translateY(-120%);
+  }
+
+  .panel-toggle-left,
+  .panel-toggle-right {
+    left: 50%;
+    right: auto;
+    top: auto;
+    bottom: 0.6rem;
+    transform: translateX(-50%);
+    width: 44px;
+    height: 30px;
+    border-radius: 8px;
+  }
+
+  .panel-toggle-left { transform: translateX(calc(-50% - 26px)); }
+  .panel-toggle-right { transform: translateX(calc(-50% + 26px)); }
+
+  .panel-toggle svg { transform: rotate(-90deg); }
+  .panel-toggle-left.is-collapsed svg,
+  .panel-toggle-right.is-collapsed svg { transform: rotate(90deg); }
 }

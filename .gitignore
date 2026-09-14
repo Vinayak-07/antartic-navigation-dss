@@ -15,3 +15,5 @@ coverage/
 outputs/*.json
 models/trained/*
 models/scalers/*
+ice/
+.claude/

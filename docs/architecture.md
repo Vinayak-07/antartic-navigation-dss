@@ -22,31 +22,45 @@ Data -> Preprocessing -> Environmental features -> Sea-ice model -> Iceberg phys
 
 ### Sea-ice prediction
 
-- Baseline ML architecture is planned.
-- Input features include concentration, drift, and local environmental variables.
-- Output includes confidence and uncertainty.
+- Baseline machine learning architecture is planned; `backend/prediction/sea_ice_prediction.py` exposes the interface the simulation calls and currently returns a planned-status placeholder.
+- Input features will include concentration, drift, and local environmental variables.
+- Output will include confidence and uncertainty (`backend/prediction/uncertainty.py`, also a placeholder for now).
 
 ### Iceberg trajectory
 
-- Physics-based model uses wind, current, Coriolis term, mass, geometry, and drag.
+- Physics-based model uses wind, current, Coriolis term, mass, geometry, and drag (`backend/physics/forces.py`, `coriolis.py`, `geometry.py`).
 - State representation uses [x, y, u, v].
-- Numerical integration uses RK45 via scipy.integrate.solve_ivp in the future implementation.
+- Numerical integration uses RK45 via scipy.integrate.solve_ivp, implemented in `backend/physics/iceberg_dynamics.py`.
 
 ### Risk grid and routing
 
-- Sea-ice and iceberg predictions feed a risk grid.
-- Route optimization uses distance, time, fuel, sea-ice risk, iceberg risk, and weather risk.
+- Sea-ice and iceberg predictions feed a risk grid (`backend/routing/cost_grid.py`).
+- Route search uses A* graph search over that grid (`backend/routing/astar.py`), with hard constraints and margin handling in `backend/routing/constraints.py`.
+- Route optimization uses distance, time, fuel, sea-ice risk, iceberg risk, and weather risk (`backend/routing/route_scoring.py`, `fuel_estimation.py`).
 - Dangerous areas can be excluded as hard constraints.
+
+### Environmental services
+
+- Wind forecast fields (U/V grids) are fetched, cached, and served with staleness metadata by `backend/wind.py`.
 
 ### Dashboard
 
 - The frontend consumes API endpoints instead of direct module imports.
 - The dashboard is designed for both mock and real data without redesign.
+- Map rendering (Leaflet) shows the sea-ice concentration heatmap, iceberg glyphs with RK45 trajectory forecasts, route alternatives, risk zones, the vessel marker, and a wind particle layer.
 
 ## Current status
 
+Implemented:
+
+- Physics-based iceberg motion: RK45 trajectory integration over wind, current, Coriolis, and drag in `backend/physics/`.
+- Route search and decision-support scoring: A* over the risk/cost grid with multi-factor route scoring in `backend/routing/`.
+- Wind field service with caching and staleness tracking (`backend/wind.py`).
+- Simulation and trip engines with deterministic state, served over the API surface (`backend/simulation.py`, `backend/app.py`, `backend/api/`).
+- Interactive Leaflet dashboard connected to the API: sea-ice heatmap, iceberg trajectories, route alternatives, risk zones, wind particles, voyage playback.
+
+Remaining:
+
 - TODO: Replace mock data with real dataset adapters.
-- TODO: Implement ML prediction baseline.
-- TODO: Implement physics-based iceberg motion.
-- TODO: Implement route search and decision support scoring.
-- PLACEHOLDER: Dashboard is intentionally static and not yet connected to full backend logic.
+- TODO: Implement the sea-ice prediction baseline (module interface exists, model body still planned).
+- TODO: Implement uncertainty estimation for prediction outputs (placeholder).

@@ -7,8 +7,8 @@
     <link rel="preconnect" href="https://server.arcgisonline.com" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-velocity@2.1.4/dist/leaflet-velocity.css" crossorigin="" />
-    <link rel="stylesheet" href="/css/style.css?v=2" />
-    <link rel="stylesheet" href="/css/map.css?v=2" />
+    <link rel="stylesheet" href="/css/style.css?v=3" />
+    <link rel="stylesheet" href="/css/map.css?v=6" />
   </head>
   <body>
     <div class="app-shell">
@@ -35,8 +35,36 @@
         </div>
       </header>
 
+      <button
+        type="button"
+        class="panel-toggle panel-toggle-left"
+        id="toggle-left-panel"
+        aria-label="Hide voyage panel"
+        aria-controls="left-panel"
+        aria-expanded="true"
+        title="Hide/show voyage panel"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M15 4 L7 12 L15 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        class="panel-toggle panel-toggle-right"
+        id="toggle-right-panel"
+        aria-label="Hide forecast panel"
+        aria-controls="right-panel"
+        aria-expanded="true"
+        title="Hide/show forecast panel"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M9 4 L17 12 L9 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+
       <main class="dashboard">
-        <aside class="panel left-panel">
+        <aside class="panel left-panel" id="left-panel">
           <div class="panel-header">
             <h2>Voyage Configuration</h2>
           </div>
@@ -122,12 +150,13 @@
               <span><i class="legend-dot route-dot"></i> Optimized Route</span>
               <span><i class="legend-dot iceberg-dot"></i> Icebergs</span>
               <span><i class="legend-dot ice-dot"></i> Sea-Ice</span>
+              <span><i class="legend-dot glacier-dot"></i> Glaciers</span>
             </div>
           </div>
           <div id="map" aria-label="Antarctic voyage map"></div>
         </section>
 
-        <aside class="panel right-panel">
+        <aside class="panel right-panel" id="right-panel">
           <div class="panel-header">
             <h2>Sea-Ice Forecast</h2>
           </div>
@@ -156,6 +185,13 @@
           </div>
           <div id="iceberg-details" class="iceberg-details">
             <p>Select an iceberg marker to inspect its physics and forecast.</p>
+          </div>
+
+          <div class="panel-header compact">
+            <h3>Nearby Glaciers</h3>
+          </div>
+          <div id="glacier-details" class="iceberg-details">
+            <p>Select a glacier marker to inspect source details.</p>
           </div>
 
           <div class="panel-header compact">
@@ -213,6 +249,7 @@
             <li>Sample sea-ice concentration grid</li>
             <li>Mock iceberg observation set</li>
             <li>Operational routing overlays</li>
+            <li>Real-world glacier position reference (SCAR/AAD gazetteer)</li>
           </ul>
         </section>
 
@@ -223,6 +260,7 @@
           <ul class="info-list">
             <li>Route generation</li>
             <li>Iceberg risk screening</li>
+            <li>Glacier proximity screening</li>
             <li>Environmental vector review</li>
             <li>Operational decision support</li>
           </ul>
@@ -243,5 +281,7 @@
     <script src="/js/app.js"></script>
     <script src="/js/map.js?v=5"></script>
     <script src="/js/trips.js"></script>
+    <script src="/js/glaciers.js?v=1"></script>
+    <script src="/js/panel-toggle.js?v=1"></script>
   </body>
 </html>

@@ -3779,3 +3779,137 @@ VISUALIZATION
 EXPLANATION
 
 That chain must remain intact throughout the project.
+============================================================
+PHASE 76 — VISUAL LEGIBILITY FIX (post-review session)
+============================================================
+
+This phase was written after reviewing the live `antartic-navigation-dss`
+repo and a screenshot of the running dashboard. Append this to the end of
+the existing `claude.md` — it does not replace anything above it, and every
+rule already in that file (terminology ban, no rebuilds, keep RK45/A*,
+keep determinism, no scientific logic in JavaScript) still applies here in
+full.
+
+The screenshot showed three concrete, fixable problems. All three are UI
+bugs on top of a backend that is already producing real data — this is not
+a "rebuild the simulation" phase, it's a "make what's already computed
+readable" phase.
+
+------------------------------------------------------------
+76.1 — ROOT CAUSE: LABELS HAVE NO COLLISION AVOIDANCE
+------------------------------------------------------------
+
+`frontend/js/map.js` places three independent kinds of `L.divIcon` labels
+directly at data coordinates, with no awareness of each other:
+
+- `renderRoutes()` drops a pill label (`.route-label`) at the midpoint of
+  every route.
+- `renderIcebergs()` drops a `+Nh` forecast label (`.iceberg-forecast-label`)
+  at every trajectory horizon point, for every iceberg.
+- The vessel marker and iceberg markers are plain point markers at their
+  own lat/lon.
+
+Because the map view is locked (`dragging: false`, `scrollWheelZoom: false`,
+fixed `fitBounds`), and because the three route alternatives + several
+iceberg trajectories all converge on the same origin and destination ports,
+many of these labels land on the *exact same pixel* every single render.
+That's the stacked "+72h / 2h" text and the clustered ship glyphs in the
+screenshot near Cape Town and near the destination station. This will
+recur with any dataset where routes/icebergs share endpoints — it's
+structural, not a one-off styling glitch, so a CSS tweak alone won't fix it.
+
+Fix direction (pick one, don't invent a third mid-implementation):
+
+- **Preferred — suppress duplicates at shared points.** Before rendering,
+  bucket all forecast/route labels by rounded screen-pixel position
+  (`map.latLngToContainerPoint`, rounded to ~20px). Render only one label
+  per bucket, and if a bucket holds more than one feature, render a small
+  stacked badge ("×3") that opens a popup listing all of them on click,
+  instead of drawing every label on top of the others.
+- **Alternative — move the always-visible label to a hover/click reveal.**
+  Keep the marker glyph always visible (that's the thing that needs to
+  read clearly at a glance), but only show the `+Nh` / route-name text in
+  a tooltip on hover or in the existing popup, so nothing is drawn as
+  permanent overlapping text. This is the simpler fix if a full collision
+  system is more than this session should take on.
+
+Either way: do not just nudge label pixel offsets by trial and error. The
+convergence point moves with every new scenario/trip, so a hardcoded offset
+will just move the overlap somewhere else on the next run.
+
+------------------------------------------------------------
+76.2 — ROOT CAUSE: ICEBERGS ARE VISUALLY INDISTINGUISHABLE FROM SEA-ICE
+------------------------------------------------------------
+
+The pale amber/gold band across the middle of the screenshot is the
+**sea-ice concentration heatmap** (`SEA_ICE_COLOR_STOPS` in `map.js`,
+rendered onto `seaIceCanvas`), not the icebergs. The actual iceberg glyphs
+(`.iceberg-glyph`, a small rotated diamond defined in `frontend/css/map.css`)
+exist in the code but are only 18×24px, drawn in the same warm amber/blue
+palette as the sea-ice layer, and get lost against it at the locked,
+zoomed-out operational view. The result — confirmed by how this was
+described when the screenshot was shared — is that the sea-ice layer reads
+as "the icebergs," and the real iceberg markers don't register at all.
+
+Fix direction:
+
+- Give the two layers unmistakably different palettes. Sea-ice concentration
+  should read as *ice/water*, not *hazard* — a blue-to-white ramp (e.g.
+  `#0a1d2e → #cfe9ff → #ffffff`) reads as "ice cover" without competing with
+  risk color coding. Reserve amber/red for what they mean elsewhere in this
+  project: risk level.
+- Redesign `.iceberg-glyph` as a small, high-contrast, unmistakably
+  "iceberg-shaped" marker rather than a rotated square: a simple SVG with a
+  visible above-water tip and a fainter submerged base works
+  (`clip-path` or a two-tone polygon), rendered in `icebergLayer` on a pane
+  with a higher z-index than `seaIceLayer` so it's never underneath the
+  heatmap. Increase base size slightly (e.g. 22×28 → 26×32) since the view
+  is permanently zoomed out and never gets closer.
+- Add a small always-visible map legend (bottom-right, out of the way of
+  the wind control) that shows: vessel, iceberg (drifting/coastal/grounded),
+  route types, and the sea-ice ramp. Right now none of this is decodable
+  without opening a popup.
+
+------------------------------------------------------------
+76.3 — REPO HYGIENE (found while reviewing, unrelated to the screenshot)
+------------------------------------------------------------
+
+Two things are committed to git that shouldn't be:
+
+- `ice/` is a full Python virtual environment (~86MB, 5,117 tracked files —
+  `ice/Lib`, `ice/Scripts`, `pyvenv.cfg`). `.gitignore` already excludes
+  `venv/` and `.venv/` but this venv happens to be named `ice`, so it slipped
+  through. Add `ice/` to `.gitignore` and remove it from tracking
+  (`git rm -r --cached ice/`).
+- `.claude/projects/C--Users-krish-Desktop-antarctic-navigation-dss/memory/`
+  is committed — this is Claude Code's own local session memory
+  (`implementation-plan.md`, `project-audit.md`), including a local Windows
+  path with a username. Add `.claude/` to `.gitignore` and untrack it too.
+
+Neither of these affects runtime behavior, but both bloat every clone and
+the second one is leaking local machine details into a public repo.
+
+Separately: `docs/architecture.md` still lists "TODO: implement ML
+prediction baseline" and "TODO: implement physics-based iceberg motion" as
+open items, but `backend/prediction/`, `backend/physics/`, and
+`backend/routing/` already contain real implementations (sea-ice
+prediction, RK45 iceberg dynamics, A* routing). Update that doc to reflect
+what's actually built before the next demo — an evaluator reading it will
+otherwise think the project is far less finished than it is.
+
+------------------------------------------------------------
+76.4 — PRIORITY ORDER FOR THIS SESSION
+------------------------------------------------------------
+
+1. Label collision fix (76.1) — this is the most jarring thing on screen.
+2. Iceberg-vs-sea-ice visual separation + legend (76.2).
+3. `.gitignore` + untrack `ice/` and `.claude/` (76.3) — quick, no risk.
+4. Refresh `docs/architecture.md` status section (76.3) — quick, no risk.
+
+Do not touch backend physics, routing, or prediction code as part of this
+phase — every problem here is in `frontend/js/map.js`,
+`frontend/css/map.css`, `.gitignore`, and `docs/architecture.md`. Re-run
+whatever visual QA process is already defined earlier in this file (see
+PHASE 47 — VISUAL QA) once these land, using the same scenario that
+produced the reviewed screenshot, and confirm the origin and destination
+clusters are legible before calling this phase done.

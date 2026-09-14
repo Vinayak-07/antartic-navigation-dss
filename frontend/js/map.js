@@ -26,20 +26,35 @@ document.addEventListener("DOMContentLoaded", () => {
   map.touchZoom.disable();
   const fixedCenter = map.getCenter();
   const fixedZoom = map.getZoom();
+  // Guard flag: Leaflet fires "moveend" synchronously inside setView, and
+  // pixel-snapped centers can wobble by ~1e-7 deg between corrections —
+  // above the default .equals() tolerance — so an unguarded re-centre can
+  // recurse until the call stack blows (intermittent RangeError).
+  let correctingView = false;
   map.on("moveend zoomend", () => {
+    if (correctingView) return;
     if (map.getZoom() !== fixedZoom || !map.getCenter().equals(fixedCenter)) {
+      correctingView = true;
       map.setView(fixedCenter, fixedZoom, { animate: false });
+      correctingView = false;
     }
   });
   mapElement.addEventListener("wheel", (event) => event.preventDefault(), { passive: false });
   mapElement.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
+  // Explicit pane ordering (phase 76.2): the sea-ice concentration canvas
+  // must sit below every iceberg feature so glyphs and trajectory lines are
+  // never painted underneath the heatmap.
+  map.createPane("sea-ice-pane");
+  map.getPane("sea-ice-pane").style.zIndex = 350;
   const routeLayer = L.layerGroup().addTo(map);
   const icebergLayer = L.layerGroup().addTo(map);
   const seaIceLayer = L.layerGroup().addTo(map);
   const vesselLayer = L.layerGroup().addTo(map);
   const riskLayer = L.layerGroup().addTo(map);
+  const labelLayer = L.layerGroup().addTo(map);
   let vesselMarker = null;
   let lastRouteSignature = "";
+  let pendingLabels = [];
   let selectedIcebergId = null;
   let seaIceCanvas = null;
   let seaIceBounds = null;
@@ -176,6 +191,35 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     map.addControl(new WindControl());
   };
+  // Always-visible legend (phase 76.2): vessel, iceberg statuses, route
+  // types, and the sea-ice ramp were previously decodable only by opening
+  // popups. Docked bottom-right, away from the wind control (bottom-left).
+  const createLegendControl = () => {
+    const LegendControl = L.Control.extend({
+      options: { position: "bottomright" },
+      onAdd: () => {
+        const container = L.DomUtil.create("div", "leaflet-control map-legend");
+        container.innerHTML = `
+          <div class="map-legend-title">Legend</div>
+          <div class="map-legend-row"><span class="legend-swatch legend-vessel"></span>Vessel</div>
+          <div class="map-legend-row"><span class="legend-swatch legend-iceberg"></span>Iceberg — drifting</div>
+          <div class="map-legend-row"><span class="legend-swatch legend-iceberg legend-iceberg-coastal"></span>Iceberg — coastal</div>
+          <div class="map-legend-row"><span class="legend-swatch legend-iceberg legend-iceberg-grounded"></span>Iceberg — grounded</div>
+          <div class="map-legend-row"><span class="legend-swatch legend-route-recommended"></span>Recommended route</div>
+          <div class="map-legend-row"><span class="legend-swatch legend-route-shortest"></span>Reference / shortest</div>
+          <div class="map-legend-row"><span class="legend-swatch legend-route-conservative"></span>Conservative route</div>
+          <div class="map-legend-row"><span class="legend-swatch legend-glacier"></span>Glacier (reference)</div>
+          <div class="map-legend-ramp">
+            <div class="legend-sea-ice-ramp"></div>
+            <div class="map-legend-row"><span>Sea-ice: open water → consolidated</span></div>
+          </div>`;
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        return container;
+      },
+    });
+    map.addControl(new LegendControl());
+  };
   const physicsPopup = (iceberg) => {
     const physics = iceberg.physics_diagnostics || {};
     const routeRisk = iceberg.route_risk || {};
@@ -201,7 +245,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (points.length < 2) return;
       const line = L.polyline(points, { color: config.color, weight: config.weight, opacity: key === "optimized" ? 0.98 : 0.76, dashArray: config.dashArray || "" }).addTo(routeLayer);
       line.bindPopup(`<b>${config.label}</b><br>${route.distance_km ?? "--"} km`);
-      L.marker(points[Math.floor(points.length / 2)], { icon: L.divIcon({ className: "route-label", html: config.label, iconSize: [128, 18] }) }).addTo(routeLayer);
+      pendingLabels.push({ latlng: points[Math.floor(points.length / 2)], className: "route-label", html: config.label, iconSize: [128, 18], summary: `<b>${config.label}</b>${route.distance_km != null ? ` · ${route.distance_km} km` : ""}` });
     });
   };
 
@@ -230,9 +274,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const marker = L.marker(point, {
         icon: L.divIcon({
           className: `iceberg-marker ${statusClass} ${selectedIcebergId === iceberg.id ? "iceberg-selected" : ""}`,
-          html: `<span class="iceberg-glyph" style="--iceberg-color:${color}"><i></i></span>`,
-          iconSize: selectedIcebergId === iceberg.id ? [28, 34] : [22, 28],
-          iconAnchor: selectedIcebergId === iceberg.id ? [14, 17] : [11, 14],
+          // Two-tone silhouette (phase 76.2): a bright above-water tip in the
+          // status/risk colour over a fainter submerged base, split by a
+          // waterline — unmistakably "iceberg", never mistakable for the
+          // blue-to-white sea-ice concentration ramp.
+          html: `<span class="iceberg-glyph" style="--iceberg-color:${color}"><svg viewBox="0 0 26 32" aria-hidden="true"><polygon class="iceberg-base" points="5,14 21,14 17,29 9,29"></polygon><polygon class="iceberg-tip" points="13,2 21,14 5,14"></polygon><line class="iceberg-waterline" x1="2" y1="14" x2="24" y2="14"></line></svg></span>`,
+          iconSize: selectedIcebergId === iceberg.id ? [30, 36] : [26, 32],
+          iconAnchor: selectedIcebergId === iceberg.id ? [15, 18] : [13, 16],
         }),
         title: `${iceberg.id} · ${status}`,
       }).addTo(icebergLayer);
@@ -247,20 +295,57 @@ document.addEventListener("DOMContentLoaded", () => {
         horizons.forEach((horizon, index) => {
           const coordinate = coordinates[index + 1];
           if (!coordinate) return;
-          L.marker([coordinate[1], coordinate[0]], { icon: L.divIcon({ className: "iceberg-forecast-label", html: `+${horizon}h`, iconSize: [38, 18] }) }).addTo(icebergLayer);
+          pendingLabels.push({ latlng: [coordinate[1], coordinate[0]], className: "iceberg-forecast-label", html: `+${horizon}h`, iconSize: [38, 18], summary: `<b>${iceberg.id}</b> · +${horizon}h forecast position` });
         });
       }
     });
   };
 
-  // Continuous sea-ice color interpolation
+  // Label collision avoidance (phase 76.1): route pills and iceberg
+  // forecast tags all converge on the same pixels because the three route
+  // alternatives and several trajectories share origin/destination
+  // endpoints. Bucket every queued label by its rounded screen position
+  // (~32px cells — slightly larger than the badge glyph itself so two
+  // buckets never overlap; the map view is locked, so container points are
+  // stable between renders) and draw one label per bucket. Crowded buckets
+  // collapse into a single "×N" badge whose popup lists everything that
+  // was suppressed underneath it, instead of stacking text on text.
+  const LABEL_BUCKET_PX = 32;
+  const flushLabels = () => {
+    labelLayer.clearLayers();
+    const buckets = new Map();
+    pendingLabels.forEach((label) => {
+      const point = map.latLngToContainerPoint(L.latLng(label.latlng));
+      const key = `${Math.round(point.x / LABEL_BUCKET_PX)}:${Math.round(point.y / LABEL_BUCKET_PX)}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(label);
+    });
+    buckets.forEach((labels) => {
+      if (labels.length === 1) {
+        const label = labels[0];
+        L.marker(label.latlng, { icon: L.divIcon({ className: label.className, html: label.html, iconSize: label.iconSize }), interactive: false }).addTo(labelLayer);
+        return;
+      }
+      const badge = L.marker(labels[0].latlng, {
+        icon: L.divIcon({ className: "label-cluster", html: `×${labels.length}`, iconSize: [30, 18] }),
+        title: `${labels.length} labels overlap here`,
+      }).addTo(labelLayer);
+      badge.bindPopup(`<div class="label-cluster-popup"><b>${labels.length} labels overlap here</b><ul>${labels.map((label) => `<li>${label.summary}</li>`).join("")}</ul></div>`, { maxWidth: 300 });
+    });
+    pendingLabels = [];
+  };
+
+  // Sea-ice concentration ramp (phase 76.2): ice/water reads as
+  // blue-to-white — open water is the deep ocean background, consolidated
+  // ice approaches white. Amber and red stay reserved for risk coding
+  // elsewhere on the map, so the heatmap no longer competes with hazards.
 const SEA_ICE_COLOR_STOPS = [
-  { value: 0.0, color: [117, 203, 255, 0.15] },   // Open water - light cyan, very transparent
-  { value: 0.1, color: [117, 203, 255, 0.25] },   // Open water
-  { value: 0.3, color: [79, 160, 252, 0.35] },    // Low - blue
-  { value: 0.6, color: [97, 214, 159, 0.45] },    // Moderate - green
-  { value: 0.8, color: [245, 199, 106, 0.55] },   // High - amber
-  { value: 1.0, color: [255, 107, 107, 0.65] },   // Very High - red
+  { value: 0.0, color: [10, 29, 46, 0.10] },      // Open water - deep ocean blue, near transparent
+  { value: 0.2, color: [42, 84, 118, 0.22] },     // Trace ice
+  { value: 0.4, color: [96, 148, 186, 0.35] },    // Low concentration
+  { value: 0.6, color: [150, 196, 228, 0.48] },   // Moderate concentration
+  { value: 0.8, color: [207, 233, 255, 0.62] },   // High concentration (#cfe9ff)
+  { value: 1.0, color: [255, 255, 255, 0.80] },   // Consolidated pack ice - white
 ];
 
 const lerpColor = (t, stops) => {
@@ -409,11 +494,13 @@ const createSeaIceCanvas = () => {
 
     ctx.putImageData(imageData, 0, 0);
 
-    // Create Leaflet ImageOverlay
+    // Create Leaflet ImageOverlay on the dedicated low z-index pane so it
+    // renders beneath iceberg trajectories, risk zones, and glyph markers
     seaIceCanvas = L.imageOverlay(canvas.toDataURL(), seaIceBounds, {
       opacity: 0.85,
       interactive: false,
       attribution: '',
+      pane: "sea-ice-pane",
     }).addTo(seaIceLayer);
   };
 
@@ -438,13 +525,22 @@ map.on('zoomend moveend', () => {
     renderRoutes(state && state.routes);
     renderIcebergs(state && state.iceberg_states, state && state.iceberg_trajectories);
     renderSeaIce(state && state.sea_ice_state);
+    flushLabels();
   };
 
   const baseLayers = { "Satellite Imagery": imagery, "Base Map": street };
-  const overlays = { "Recommended / routes": routeLayer, "Icebergs": icebergLayer, "Sea-Ice": seaIceLayer, "Vessel": vesselLayer, "Risk zones": riskLayer };
-  L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
+  const overlays = { "Recommended / routes": routeLayer, "Icebergs": icebergLayer, "Sea-Ice": seaIceLayer, "Vessel": vesselLayer, "Risk zones": riskLayer, "Labels": labelLayer };
+  const layersControl = L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
   createWindControl();
-  window.mapController = { map, updateState };
+  createLegendControl();
+  // Other modules (glaciers.js) may register their own overlay groups and
+  // query the vessel position for proximity readouts.
+  window.mapController = {
+    map,
+    updateState,
+    registerOverlay: (name, layer) => layersControl.addOverlay(layer, name),
+    getVesselPosition: () => vesselMarker && vesselMarker.getLatLng(),
+  };
   loadWindField();
   window.addEventListener("resize", () => {
     map.invalidateSize();
