@@ -48,7 +48,7 @@ document.addEventListener("DOMContentLoaded", () => {
   map.getPane("sea-ice-pane").style.zIndex = 350;
   const routeLayer = L.layerGroup().addTo(map);
   const icebergLayer = L.layerGroup().addTo(map);
-  const seaIceLayer = L.layerGroup().addTo(map);
+  /* seaIceLayer removed */
   const vesselLayer = L.layerGroup().addTo(map);
   const riskLayer = L.layerGroup().addTo(map);
   const labelLayer = L.layerGroup().addTo(map);
@@ -56,11 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let lastRouteSignature = "";
   let pendingLabels = [];
   let selectedIcebergId = null;
-  let seaIceCanvas = null;
-  let seaIceBounds = null;
-  let seaIceData = null;
-  let seaIceAnimationFrame = null;
-  let seaIceTime = 0;
+  /* sea-ice vars removed */
   let windVelocityLayer = null;
   let windField = null;
   let windEnabled = true;
@@ -199,6 +195,9 @@ document.addEventListener("DOMContentLoaded", () => {
       options: { position: "bottomright" },
       onAdd: () => {
         const container = L.DomUtil.create("div", "leaflet-control map-legend");
+        // Responsive: legend shrinks when right-side panel is hidden via arrow
+        container.style.transition = "transform 0.3s ease, opacity 0.3s ease";
+        container.style.transform = "scale(1)";
         container.innerHTML = `
           <div class="map-legend-title">Legend</div>
           <div class="map-legend-row"><span class="legend-swatch legend-vessel"></span>Vessel</div>
@@ -209,10 +208,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="map-legend-row"><span class="legend-swatch legend-route-shortest"></span>Reference / shortest</div>
           <div class="map-legend-row"><span class="legend-swatch legend-route-conservative"></span>Conservative route</div>
           <div class="map-legend-row"><span class="legend-swatch legend-glacier"></span>Glacier (reference)</div>
-          <div class="map-legend-ramp">
-            <div class="legend-sea-ice-ramp"></div>
-            <div class="map-legend-row"><span>Sea-ice: open water → consolidated</span></div>
-          </div>`;
+      `;
         L.DomEvent.disableClickPropagation(container);
         L.DomEvent.disableScrollPropagation(container);
         return container;
@@ -596,7 +592,6 @@ map.on('zoomend moveend', () => {
     }
     renderRoutes(state && state.routes);
     renderIcebergs(state && state.iceberg_states, state && state.iceberg_trajectories);
-    renderSeaIce(state && state.sea_ice_state);
     flushLabels();
   };
 
@@ -621,7 +616,7 @@ map.on('zoomend moveend', () => {
   };
 
   const baseLayers = { "Satellite Imagery": imagery, "Base Map": street };
-  const overlays = { "Recommended / routes": routeLayer, "Icebergs": icebergLayer, "Sea-Ice": seaIceLayer, "Vessel": vesselLayer, "Risk zones": riskLayer, "Labels": labelLayer };
+  const overlays = { "Recommended / routes": routeLayer, "Icebergs": icebergLayer, /* sea-ice removed */ "Vessel": vesselLayer, "Risk zones": riskLayer, "Labels": labelLayer };
   const layersControl = L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
   createWindControl();
   createLegendControl();
