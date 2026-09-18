@@ -505,6 +505,15 @@ def compute_vessel_state(
         lon_change = (dist_km / (111.0 * max(0.1, math.cos(math.radians(current_lat))))) * math.sin(heading_rad)
         new_lat = current_lat + lat_change
         new_lon = current_lon + lon_change
+        # Cross-track correction: nudge back toward route target proportional
+        # to drift magnitude (dead-reckoning accumulates error over time)
+        target_lat, target_lon, _ = interpolate_route(route, distance_along_route)
+        lat_drift = target_lat - new_lat
+        lon_drift = target_lon - new_lon
+        # Proportional correction — stronger the farther off
+        correction_factor = min(0.35, 0.08 * max(1.0, dt_hours))
+        new_lat += lat_drift * correction_factor
+        new_lon += lon_drift * correction_factor
     else:
         new_lat, new_lon = target_lat, target_lon
 

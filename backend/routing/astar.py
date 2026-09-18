@@ -7,8 +7,28 @@ import math
 def find_route(grid, start, goal, avoid_margin: float = 0.0):
     cells = grid["cells"]
     step = grid["step"]
-    start_node = min(cells, key=lambda cell: distance(cell, start))
-    goal_node = min(cells, key=lambda cell: distance(cell, goal))
+    # Pick nearest UNBLOCKED cell for start/goal — destination/origin cells
+    # must not be inside the coast buffer and therefore unreachable.
+    def nearest_unblocked_key(point):
+        best = None
+        best_d = float('inf')
+        for k, cell in cells.items():
+            if isinstance(cell, dict) and cell.get("blocked"):
+                continue
+            if isinstance(k, (list, tuple)) and len(k) == 2:
+                d = distance(k, point)
+            elif isinstance(k, dict):
+                d = distance((k.get("lat", 0), k.get("lon", 0)), point)
+            else:
+                d = distance((float(k[0]), float(k[1])) if hasattr(k, '__len__') and len(k) >= 2 else (0, 0), point)
+            if d < best_d:
+                best_d = d
+                best = k
+        return best
+    start_node = nearest_unblocked_key(start)
+    goal_node = nearest_unblocked_key(goal)
+    if start_node is None or goal_node is None:
+        return []
     frontier = [(0.0, start_node)]
     came_from = {start_node: None}
     cost_so_far = {start_node: 0.0}
