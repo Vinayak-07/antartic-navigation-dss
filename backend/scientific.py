@@ -128,14 +128,16 @@ class SeaIceModel:
     @staticmethod
     def category(concentration: float) -> str:
         if concentration < 0.1:
-            return "Open Water"
+            return "OPEN_WATER"
         if concentration < 0.3:
-            return "Low"
-        if concentration < 0.6:
-            return "Moderate"
-        if concentration < 0.8:
-            return "High"
-        return "Very High"
+            return "VERY_OPEN_ICE"
+        if concentration < 0.5:
+            return "OPEN_ICE"
+        if concentration < 0.7:
+            return "CLOSE_ICE"
+        if concentration < 0.9:
+            return "VERY_CLOSE_ICE"
+        return "FAST_ICE"
 
 
 class IcebergModel:
