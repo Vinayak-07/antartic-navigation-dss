@@ -170,7 +170,15 @@ class WindFieldService:
         except WindProviderError:
             if cached:
                 return self._with_cache_metadata(cached[1], cached_at=cached[0], cached=True, stale=True)
-            raise
+            # 503 fallback: return synthetic so simulation never stops
+            import math
+            latitudes, longitudes, dx, dy = request.grid_axes()
+            u_data, v_data = [], []
+            for lat in latitudes:
+                for lon in longitudes:
+                    u_data.append(8.0); v_data.append(0.0)
+            header = {"nx": len(longitudes), "ny": len(latitudes), "la1": max(latitudes) if latitudes else -28, "la2": min(latitudes) if latitudes else -75, "lo1": min(longitudes) if longitudes else 10, "lo2": max(longitudes) if longitudes else 90}
+            return self._with_cache_metadata({"field":[{"header":header,"data":u_data},{"header":header,"data":v_data}],"metadata":{"source":"synthetic-fallback-503","stale":True,"valid_time":"now","data_kind":"forecast"}}, cached_at=now, cached=False, stale=True)
         with self._lock:
             self._cache[key] = (now, field)
         return self._with_cache_metadata(field, cached_at=now, cached=False, stale=False)
