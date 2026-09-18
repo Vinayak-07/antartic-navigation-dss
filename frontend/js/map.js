@@ -481,13 +481,16 @@ const renderSeaIce = (seaIce) => { seaIceLayer.clearLayers(); };
     getVesselPosition: () => vesselMarker && vesselMarker.getLatLng(),
   };
   loadWindField();
+  setTimeout(function(){ if(windEnabled && windField && typeof L.velocityLayer === "function") attachWindLayer(); }, 800);
   window.addEventListener("resize", () => {
     map.invalidateSize();
     loadWindField();
+  setTimeout(function(){ if(windEnabled && windField && typeof L.velocityLayer === "function") attachWindLayer(); }, 800);
   });
   window.setTimeout(() => {
     map.invalidateSize();
     loadWindField();
+  setTimeout(function(){ if(windEnabled && windField && typeof L.velocityLayer === "function") attachWindLayer(); }, 800);
   }, 200);
 });
 // legend-arrow hook applied
