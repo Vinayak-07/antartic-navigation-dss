@@ -128,14 +128,16 @@ class SeaIceModel:
     @staticmethod
     def category(concentration: float) -> str:
         if concentration < 0.1:
-            return "Open Water"
+            return "OPEN_WATER"
         if concentration < 0.3:
-            return "Low"
-        if concentration < 0.6:
-            return "Moderate"
-        if concentration < 0.8:
-            return "High"
-        return "Very High"
+            return "VERY_OPEN_ICE"
+        if concentration < 0.5:
+            return "OPEN_ICE"
+        if concentration < 0.7:
+            return "CLOSE_ICE"
+        if concentration < 0.9:
+            return "VERY_CLOSE_ICE"
+        return "FAST_ICE"
 
 
 class IcebergModel:
@@ -392,19 +394,26 @@ def iceberg_route_risk(iceberg: Mapping[str, object], route: Sequence[Sequence[f
     return {"risk_score": round(score, 4), "risk_level": level, "minimum_distance_km": round(minimum_distance, 2), "risk_radius_km": round(radius_km, 2), "closest_horizon_hours": closest_time, "route_conflict": minimum_distance <= radius_km}
 
 
-def build_routes(origin: Sequence[float], destination: Sequence[float], ice: SeaIceModel, bergs: Sequence[Mapping[str, object]], environment: SyntheticEnvironmentProvider, simulation_hours: float) -> Dict[str, Dict[str, object]]:
+def build_routes(origin: Sequence[float], destination: Sequence[float], ice: SeaIceModel, bergs: Sequence[Mapping[str, object]], environment: SyntheticEnvironmentProvider, simulation_hours: float, iceberg_model: IcebergModel = None, vessel_ice_class: str = "PC6") -> Dict[str, Dict[str, object]]:
     from backend.routing.astar import find_route
     from backend.routing.cost_grid import build_cost_grid
     from backend.routing.route_scoring import score_route
     midpoint = [(origin[0] + destination[0]) / 2.0, (origin[1] + destination[1]) / 2.0]
-    shortest = [list(origin), [midpoint[0] + 4.5, midpoint[1] - 7.0], list(destination)]
-    conservative = [list(origin), [midpoint[0] - 3.0, midpoint[1] - 13.0], [destination[0] + 1.8, destination[1] - 5.0], list(destination)]
-    grid = build_cost_grid(origin, destination, ice, bergs, environment, simulation_hours)
-    optimized = find_route(grid, shortest[0], shortest[-1], avoid_margin=8.0) or shortest
+    reference_shortest = [list(origin), [midpoint[0] + 4.5, midpoint[1] - 7.0], list(destination)]
+    reference_conservative = [list(origin), [midpoint[0] - 3.0, midpoint[1] - 13.0], [destination[0] + 1.8, destination[1] - 5.0], list(destination)]
+    
+    # Build iceberg trajectories for future risk evaluation
+    iceberg_trajectories = {}
+    if iceberg_model:
+        for berg in bergs:
+            iceberg_trajectories[berg["id"]] = iceberg_model.trajectory(berg, simulation_hours)
+    
+    grid = build_cost_grid(origin, destination, ice, bergs, environment, simulation_hours, iceberg_trajectories=iceberg_trajectories, vessel_ice_class=vessel_ice_class)
+    optimized = find_route(grid, reference_shortest[0], reference_shortest[-1], avoid_margin=8.0) or reference_shortest
     if len(optimized) < 2:
-        optimized = shortest
+        optimized = reference_shortest
     routes = {}
-    for key, name, points in (("shortest", "Reference / shortest", shortest), ("optimized", "Recommended", optimized), ("conservative", "Conservative", conservative)):
+    for key, name, points in (("reference_shortest", "Reference / shortest", reference_shortest), ("optimized", "Recommended", optimized), ("reference_conservative", "Conservative", reference_conservative)):
         score = score_route(points, ice, bergs, environment, simulation_hours)
         routes[key] = {"name": name, "points": points, **score}
     return routes
@@ -496,6 +505,15 @@ def compute_vessel_state(
         lon_change = (dist_km / (111.0 * max(0.1, math.cos(math.radians(current_lat))))) * math.sin(heading_rad)
         new_lat = current_lat + lat_change
         new_lon = current_lon + lon_change
+        # Cross-track correction: nudge back toward route target proportional
+        # to drift magnitude (dead-reckoning accumulates error over time)
+        target_lat, target_lon, _ = interpolate_route(route, distance_along_route)
+        lat_drift = target_lat - new_lat
+        lon_drift = target_lon - new_lon
+        # Proportional correction — stronger the farther off
+        correction_factor = min(0.35, 0.08 * max(1.0, dt_hours))
+        new_lat += lat_drift * correction_factor
+        new_lon += lon_drift * correction_factor
     else:
         new_lat, new_lon = target_lat, target_lon
 

@@ -6,41 +6,41 @@ document.addEventListener("DOMContentLoaded", () => {
   const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors", maxZoom: 18 });
   const operationalBounds = L.latLngBounds([[-75, 10], [-28, 90]]);
   const map = L.map("map", {
-    zoomControl: false,
+    zoomControl: true,
     attributionControl: true,
     layers: [imagery],
     maxBounds: operationalBounds,
-    maxBoundsViscosity: 1.0,
-    dragging: false,
-    scrollWheelZoom: false,
-    doubleClickZoom: false,
-    boxZoom: false,
-    keyboard: false,
-    touchZoom: false,
+    maxBoundsViscosity: 0.9,
+    minZoom: 2,
+    maxZoom: 18,
   }).fitBounds(operationalBounds, { padding: [8, 8], maxZoom: 4 });
-  map.dragging.disable();
-  map.boxZoom.disable();
-  map.doubleClickZoom.disable();
-  map.keyboard.disable();
-  map.scrollWheelZoom.disable();
-  map.touchZoom.disable();
-  const fixedCenter = map.getCenter();
-  const fixedZoom = map.getZoom();
-  // Guard flag: Leaflet fires "moveend" synchronously inside setView, and
-  // pixel-snapped centers can wobble by ~1e-7 deg between corrections —
-  // above the default .equals() tolerance — so an unguarded re-centre can
-  // recurse until the call stack blows (intermittent RangeError).
-  let correctingView = false;
-  map.on("moveend zoomend", () => {
-    if (correctingView) return;
-    if (map.getZoom() !== fixedZoom || !map.getCenter().equals(fixedCenter)) {
-      correctingView = true;
-      map.setView(fixedCenter, fixedZoom, { animate: false });
-      correctingView = false;
-    }
+  
+  // Add home/reset button
+  const HomeControl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd: () => {
+      const container = L.DomUtil.create("div", "leaflet-control leaflet-bar");
+      const link = L.DomUtil.create("a", "", container);
+      link.href = "#";
+      link.title = "Reset view";
+      link.innerHTML = "⌂";
+      link.style.width = "30px";
+      link.style.height = "30px";
+      link.style.lineHeight = "30px";
+      link.style.textAlign = "center";
+      link.style.fontSize = "18px";
+      link.style.textDecoration = "none";
+      link.style.color = "#333";
+      L.DomEvent.disableClickPropagation(link);
+      L.DomEvent.on(link, "click", (e) => {
+        L.DomEvent.preventDefault(e);
+        map.fitBounds(operationalBounds, { padding: [8, 8], maxZoom: 4 });
+      });
+      return container;
+    },
   });
-  mapElement.addEventListener("wheel", (event) => event.preventDefault(), { passive: false });
-  mapElement.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
+  map.addControl(new HomeControl());
+  
   // Explicit pane ordering (phase 76.2): the sea-ice concentration canvas
   // must sit below every iceberg feature so glyphs and trajectory lines are
   // never painted underneath the heatmap.
@@ -48,7 +48,7 @@ document.addEventListener("DOMContentLoaded", () => {
   map.getPane("sea-ice-pane").style.zIndex = 350;
   const routeLayer = L.layerGroup().addTo(map);
   const icebergLayer = L.layerGroup().addTo(map);
-  const seaIceLayer = L.layerGroup().addTo(map);
+  /* seaIceLayer removed */
   const vesselLayer = L.layerGroup().addTo(map);
   const riskLayer = L.layerGroup().addTo(map);
   const labelLayer = L.layerGroup().addTo(map);
@@ -56,11 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let lastRouteSignature = "";
   let pendingLabels = [];
   let selectedIcebergId = null;
-  let seaIceCanvas = null;
-  let seaIceBounds = null;
-  let seaIceData = null;
-  let seaIceAnimationFrame = null;
-  let seaIceTime = 0;
+  /* sea-ice vars removed */
   let windVelocityLayer = null;
   let windField = null;
   let windEnabled = true;
@@ -199,6 +195,9 @@ document.addEventListener("DOMContentLoaded", () => {
       options: { position: "bottomright" },
       onAdd: () => {
         const container = L.DomUtil.create("div", "leaflet-control map-legend");
+        // Responsive: legend shrinks when right-side panel is hidden via arrow
+        container.style.transition = "transform 0.3s ease, opacity 0.3s ease";
+        container.style.transform = "scale(1)";
         container.innerHTML = `
           <div class="map-legend-title">Legend</div>
           <div class="map-legend-row"><span class="legend-swatch legend-vessel"></span>Vessel</div>
@@ -209,10 +208,7 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="map-legend-row"><span class="legend-swatch legend-route-shortest"></span>Reference / shortest</div>
           <div class="map-legend-row"><span class="legend-swatch legend-route-conservative"></span>Conservative route</div>
           <div class="map-legend-row"><span class="legend-swatch legend-glacier"></span>Glacier (reference)</div>
-          <div class="map-legend-ramp">
-            <div class="legend-sea-ice-ramp"></div>
-            <div class="map-legend-row"><span>Sea-ice: open water → consolidated</span></div>
-          </div>`;
+      `;
         L.DomEvent.disableClickPropagation(container);
         L.DomEvent.disableScrollPropagation(container);
         return container;
@@ -238,7 +234,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     lastRouteSignature = signature;
     routeLayer.clearLayers();
-    const configs = { shortest: { color: "#f8d66d", weight: 3, dashArray: "6 7", label: "Reference / shortest" }, optimized: { color: "#6ee7b7", weight: 5, label: "Recommended" }, conservative: { color: "#7ec8ff", weight: 3, dashArray: "12 8", label: "Conservative" } };
+    const configs = { 
+      reference_shortest: { color: "#f8d66d", weight: 3, dashArray: "6 7", label: "Reference / shortest" }, 
+      optimized: { color: "#6ee7b7", weight: 5, label: "Recommended" }, 
+      reference_conservative: { color: "#7ec8ff", weight: 3, dashArray: "12 8", label: "Conservative" } 
+    };
     Object.entries(routes || {}).forEach(([key, route]) => {
       const config = configs[key] || configs.optimized;
       const points = Array.isArray(route.points) ? route.points : [];
@@ -248,6 +248,11 @@ document.addEventListener("DOMContentLoaded", () => {
       pendingLabels.push({ latlng: points[Math.floor(points.length / 2)], className: "route-label", html: config.label, iconSize: [128, 18], summary: `<b>${config.label}</b>${route.distance_km != null ? ` · ${route.distance_km} km` : ""}` });
     });
   };
+
+  // Store iceberg animation state
+  let icebergMarkers = {};
+  let icebergAnimationFrame = null;
+  let lastSimulationTime = 0;
 
   const renderIcebergs = (icebergs, trajectories) => {
     icebergLayer.clearLayers();
@@ -289,16 +294,64 @@ document.addEventListener("DOMContentLoaded", () => {
         selectedIcebergId = iceberg.id;
         document.dispatchEvent(new CustomEvent("iceberg-selected", { detail: { iceberg, trajectory: feature } }));
       });
+      // Store trajectory for animation
       if (Array.isArray(coordinates) && coordinates.length > 1) {
-        L.polyline(coordinates.map((coordinate) => [coordinate[1], coordinate[0]]), { color, weight: selectedIcebergId === iceberg.id ? 3 : 2, opacity: 0.8, dashArray: "6 8" }).addTo(icebergLayer);
-        const horizons = feature.properties && feature.properties.horizons_hours || [];
-        horizons.forEach((horizon, index) => {
-          const coordinate = coordinates[index + 1];
+        icebergMarkers[iceberg.id] = {
+          marker: marker,
+          coordinates: coordinates.map((coordinate) => [coordinate[1], coordinate[0]]),
+          horizons: feature.properties && feature.properties.horizons_hours || [],
+          color: color,
+          status: status,
+          selected: selectedIcebergId === iceberg.id,
+        };
+        // Draw trajectory path
+        L.polyline(icebergMarkers[iceberg.id].coordinates, { color, weight: icebergMarkers[iceberg.id].selected ? 3 : 2, opacity: 0.8, dashArray: "6 8" }).addTo(icebergLayer);
+        icebergMarkers[iceberg.id].horizons.forEach((horizon, index) => {
+          const coordinate = icebergMarkers[iceberg.id].coordinates[index + 1];
           if (!coordinate) return;
-          pendingLabels.push({ latlng: [coordinate[1], coordinate[0]], className: "iceberg-forecast-label", html: `+${horizon}h`, iconSize: [38, 18], summary: `<b>${iceberg.id}</b> · +${horizon}h forecast position` });
+          pendingLabels.push({ latlng: coordinate, className: "iceberg-forecast-label", html: `+${horizon}h`, iconSize: [38, 18], summary: `<b>${iceberg.id}</b> · +${horizon}h forecast position` });
         });
       }
     });
+    // Start animation loop
+    startIcebergAnimation();
+  };
+
+  const startIcebergAnimation = () => {
+    if (icebergAnimationFrame) {
+      cancelAnimationFrame(icebergAnimationFrame);
+    }
+    const animate = (timestamp) => {
+      // Animate iceberg markers along their trajectories
+      const currentTime = lastSimulationTime || 0;
+      Object.values(icebergMarkers).forEach((data) => {
+        if (!data.marker || !data.coordinates || data.coordinates.length < 2) return;
+        // Interpolate position based on simulation time
+        // Each coordinate corresponds to a time horizon (0, 6, 12, 24, 48, 72 hours)
+        // We animate smoothly between these points
+        const horizons = [0, 6, 12, 24, 48, 72];
+        let segmentIndex = 0;
+        for (let i = 0; i < horizons.length - 1; i++) {
+          if (currentTime % 72 >= horizons[i] && currentTime % 72 < horizons[i + 1]) {
+            segmentIndex = i;
+            break;
+          }
+        }
+        // Smooth interpolation within segment
+        const segmentStart = horizons[segmentIndex];
+        const segmentEnd = horizons[segmentIndex + 1];
+        const segmentProgress = (currentTime % 72 - segmentStart) / (segmentEnd - segmentStart);
+        const startCoord = data.coordinates[segmentIndex];
+        const endCoord = data.coordinates[segmentIndex + 1];
+        if (startCoord && endCoord) {
+          const interpLat = startCoord[0] + (endCoord[0] - startCoord[0]) * segmentProgress;
+          const interpLon = startCoord[1] + (endCoord[1] - startCoord[1]) * segmentProgress;
+          data.marker.setLatLng([interpLat, interpLon]);
+        }
+      });
+      icebergAnimationFrame = requestAnimationFrame(animate);
+    };
+    icebergAnimationFrame = requestAnimationFrame(animate);
   };
 
   // Label collision avoidance (phase 76.1): route pills and iceberg
@@ -385,135 +438,25 @@ const bilinearInterpolate = (grid, x, y, width, height) => {
          (v22 * fx * fy);
 };
 
-const renderSeaIce = (seaIce) => {
-    seaIceLayer.clearLayers();
-    if (!seaIce || !Array.isArray(seaIce.grid)) return;
 
-    // Extract grid data into a 2D array for interpolation
-    const cells = seaIce.grid;
-    if (cells.length === 0) return;
 
-    // Determine grid bounds and resolution
-    const lats = cells.map(c => c.center[0]).sort((a, b) => a - b);
-    const lons = cells.map(c => c.center[1]).sort((a, b) => a - b);
-    const uniqueLats = [...new Set(lats.map(l => Math.round(l * 100) / 100))].sort((a, b) => a - b);
-    const uniqueLons = [...new Set(lons.map(l => Math.round(l * 100) / 100))].sort((a, b) => a - b);
 
-    const latStep = uniqueLats.length > 1 ? uniqueLats[1] - uniqueLats[0] : 4.0;
-    const lonStep = uniqueLons.length > 1 ? uniqueLons[1] - uniqueLons[0] : 4.0;
-
-    // Create 2D concentration grid
-    const gridWidth = uniqueLons.length;
-    const gridHeight = uniqueLats.length;
-    const concentrationGrid = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(0));
-
-    cells.forEach(cell => {
-      if (!cell.center) return;
-      const latIdx = uniqueLats.findIndex(l => Math.abs(l - cell.center[0]) < latStep / 2);
-      const lonIdx = uniqueLons.findIndex(l => Math.abs(l - cell.center[1]) < lonStep / 2);
-      if (latIdx >= 0 && lonIdx >= 0) {
-        concentrationGrid[latIdx][lonIdx] = cell.concentration ?? 0;
-      }
-    });
-
-    // Store for canvas rendering
-    seaIceData = {
-      grid: concentrationGrid,
-      bounds: {
-        south: uniqueLats[0] - latStep / 2,
-        north: uniqueLats[uniqueLats.length - 1] + latStep / 2,
-        west: uniqueLons[0] - lonStep / 2,
-        east: uniqueLons[uniqueLons.length - 1] + lonStep / 2,
-      },
-      latStep,
-      lonStep,
-      uniqueLats,
-      uniqueLons,
-    };
-
-    seaIceBounds = [
-      [seaIceData.bounds.south, seaIceData.bounds.west],
-      [seaIceData.bounds.north, seaIceData.bounds.east],
-    ];
-
-    // Create or update canvas overlay
-    createSeaIceCanvas();
-  };
-
-const createSeaIceCanvas = () => {
-    if (!seaIceData) return;
-
-    // Remove existing canvas if any
-    if (seaIceCanvas) {
-      map.removeLayer(seaIceCanvas);
-      seaIceCanvas = null;
-    }
-
-    // Create canvas element
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    // Calculate canvas size based on map view - use higher resolution for smoother rendering
-    const bounds = seaIceData.bounds;
-    const mapSize = map.getSize();
-    const swPoint = map.latLngToContainerPoint([bounds.south, bounds.west]);
-    const nePoint = map.latLngToContainerPoint([bounds.north, bounds.east]);
-    const canvasWidth = Math.abs(nePoint.x - swPoint.x);
-    const canvasHeight = Math.abs(swPoint.y - nePoint.y);
-
-    // Use a reasonable resolution (max 512px on longest side for performance)
-    const maxDim = Math.max(canvasWidth, canvasHeight);
-    const scale = maxDim > 512 ? 512 / maxDim : 1;
-    canvas.width = Math.round(canvasWidth * scale);
-    canvas.height = Math.round(canvasHeight * scale);
-
-    const grid = seaIceData.grid;
-    const gridHeight = grid.length;
-    const gridWidth = grid[0]?.length ?? 0;
-
-    // Render interpolated sea-ice field
-    const imageData = ctx.createImageData(canvas.width, canvas.height);
-    const data = imageData.data;
-
-    for (let py = 0; py < canvas.height; py++) {
-      for (let px = 0; px < canvas.width; px++) {
-        // Map canvas pixel to grid coordinates
-        const gx = (px / canvas.width) * (gridWidth - 1);
-        const gy = (py / canvas.height) * (gridHeight - 1);
-
-        const concentration = bilinearInterpolate(grid, gx, gy, gridWidth, gridHeight);
-        const color = lerpColor(concentration, SEA_ICE_COLOR_STOPS);
-
-        const idx = (py * canvas.width + px) * 4;
-        data[idx] = color[0];     // R
-        data[idx + 1] = color[1]; // G
-        data[idx + 2] = color[2]; // B
-        data[idx + 3] = Math.round(color[3] * 255); // A
-      }
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-
-    // Create Leaflet ImageOverlay on the dedicated low z-index pane so it
-    // renders beneath iceberg trajectories, risk zones, and glyph markers
-    seaIceCanvas = L.imageOverlay(canvas.toDataURL(), seaIceBounds, {
-      opacity: 0.85,
-      interactive: false,
-      attribution: '',
-      pane: "sea-ice-pane",
-    }).addTo(seaIceLayer);
-  };
-
-// Re-render sea ice on zoom/pan for crisp interpolation
-map.on('zoomend moveend', () => {
-    if (seaIceData) {
-      createSeaIceCanvas();
+  // Legend moves when right-side tab is hidden via arrow
+  document.addEventListener("panel-toggled", (e) => {
+    const legend = document.querySelector(".map-legend");
+    if (legend) {
+      legend.style.transform = e.detail.hidden ? "translateX(-40px) scale(0.85)" : "translateX(0) scale(1)";
+      legend.style.transition = "transform 0.35s ease";
     }
   });
 
-  map.on("click", (event) => {
-    if (windEnabled && windField) showWindInspector(event.latlng);
-  });
+  const baseLayers = { "Satellite Imagery": imagery, "Base Map": street };
+  const overlays = { "Recommended / routes": routeLayer, "Icebergs": icebergLayer, /* sea-ice removed */ "Vessel": vesselLayer, "Risk zones": riskLayer, "Labels": labelLayer };
+  const layersControl = L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
+  createWindControl();
+  createLegendControl();
+  // Other modules (glaciers.js) may register their own overlay groups and
+  // query the vessel position for proximity readouts.
 
   const updateState = (state) => {
     const vessel = state && state.vessel_state;
@@ -522,32 +465,30 @@ map.on('zoomend moveend', () => {
       else { vesselMarker.setLatLng([vessel.lat, vessel.lon]); vesselMarker.setIcon(vesselIcon(vessel.heading_deg)); }
       vesselMarker.bindPopup(`<b>${vessel.name || "Vessel"}</b><br>Speed: ${vessel.speed_kn ?? "--"} kn<br>Heading: ${vessel.heading_deg ?? "--"}°<br>Fuel: ${vessel.fuel_remaining_pct ?? "--"}%<br>Risk: ${vessel.risk_state || "--"}`);
     }
+    if (state && state.simulation_time !== undefined) lastSimulationTime = state.simulation_time;
     renderRoutes(state && state.routes);
     renderIcebergs(state && state.iceberg_states, state && state.iceberg_trajectories);
-    renderSeaIce(state && state.sea_ice_state);
     flushLabels();
   };
 
-  const baseLayers = { "Satellite Imagery": imagery, "Base Map": street };
-  const overlays = { "Recommended / routes": routeLayer, "Icebergs": icebergLayer, "Sea-Ice": seaIceLayer, "Vessel": vesselLayer, "Risk zones": riskLayer, "Labels": labelLayer };
-  const layersControl = L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(map);
-  createWindControl();
-  createLegendControl();
-  // Other modules (glaciers.js) may register their own overlay groups and
-  // query the vessel position for proximity readouts.
+  window.updateState = updateState;
   window.mapController = {
     map,
-    updateState,
+    updateState: updateState,
     registerOverlay: (name, layer) => layersControl.addOverlay(layer, name),
     getVesselPosition: () => vesselMarker && vesselMarker.getLatLng(),
   };
   loadWindField();
+  setTimeout(function(){ if(windEnabled && windField && typeof L.velocityLayer === "function") attachWindLayer(); }, 800);
   window.addEventListener("resize", () => {
     map.invalidateSize();
     loadWindField();
+  setTimeout(function(){ if(windEnabled && windField && typeof L.velocityLayer === "function") attachWindLayer(); }, 800);
   });
   window.setTimeout(() => {
     map.invalidateSize();
     loadWindField();
+  setTimeout(function(){ if(windEnabled && windField && typeof L.velocityLayer === "function") attachWindLayer(); }, 800);
   }, 200);
 });
+// legend-arrow hook applied

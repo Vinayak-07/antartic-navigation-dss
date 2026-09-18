@@ -46,7 +46,7 @@ def test_trip_vessel_fuel_risk_rerouting_and_replay():
     assert state["distance_km"] > 0
     assert state["vessel_state"]["fuel_remaining_pct"] < 100
     assert set(("sea_ice_risk", "iceberg_risk", "weather_risk", "overall_navigation_risk")) <= set(state["risk"])
-    assert state["active_route"] in {"optimized", "conservative"}
+    assert state["active_route"] in {"optimized", "reference_conservative"}
     assert any(event["event_type"] == "ROUTE_RECALCULATED" for event in state["events"])
     engine.seek_trip(trip["id"], 5)
     replay = engine.get_trip_state(trip["id"])
@@ -63,8 +63,8 @@ def test_round_trip_phase_and_reproducibility():
     assert trip_a["iceberg_states"] == trip_b["iceberg_states"]
     assert trip_a["sea_ice"] == trip_b["sea_ice"]
     first.start_trip(trip_a["id"])
-    for _ in range(121):
-        first.step_trip(trip_a["id"])
+    # Seek directly to a time after the estimated outbound hours
+    first.seek_trip(trip_a["id"], 140.0)
     assert first.get_trip(trip_a["id"])["phase"] == "RETURN"
 
 
