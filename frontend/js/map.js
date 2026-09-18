@@ -474,3 +474,4 @@ const renderSeaIce = (seaIce) => { seaIceLayer.clearLayers(); };
     loadWindField();
   }, 200);
 });
+// legend-arrow hook applied
