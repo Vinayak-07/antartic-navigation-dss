@@ -135,7 +135,7 @@ class OpenMeteoWindProvider:
             except Exception as exc:  # Transient limits (503, rate limit) must not break layer
                 last_error = exc
                 # Degrade gracefully: do not raise; synthetic demo continues
-                return [{"wind_speed_10m": 8.0, "wind_direction_10m": 180, "latitude": batch[i][0], "longitude": batch[i][1], "status": "synthetic-fallback-503", "error": str(exc)} for i in range(len(batch))]
+                return [{"current": {"wind_speed_10m": 8.0, "wind_direction_10m": 180, "time": "now"}, "wind_speed_10m": 8.0, "wind_direction_10m": 180, "latitude": batch[i][0], "longitude": batch[i][1], "status": "synthetic-fallback-503", "error": str(exc)} for i in range(len(batch))]
             response_records = payload if isinstance(payload, list) else [payload]
             if len(response_records) != len(batch):
                 raise WindProviderError("Open-Meteo returned an incomplete coordinate batch.")
@@ -177,7 +177,7 @@ class WindFieldService:
             for lat in latitudes:
                 for lon in longitudes:
                     u_data.append(8.0); v_data.append(0.0)
-            header = {"nx": len(longitudes), "ny": len(latitudes), "la1": max(latitudes) if latitudes else -28, "la2": min(latitudes) if latitudes else -75, "lo1": min(longitudes) if longitudes else 10, "lo2": max(longitudes) if longitudes else 90}
+            header = {"nx": len(longitudes), "ny": len(latitudes), "la1": max(latitudes) if latitudes else -28, "la2": min(latitudes) if latitudes else -75, "lo1": min(longitudes) if longitudes else 10, "lo2": max(longitudes) if longitudes else 90, "dx": round(dx, 6), "dy": round(dy, 6)}
             return self._with_cache_metadata({"field":[{"header":header,"data":u_data},{"header":header,"data":v_data}],"metadata":{"source":"synthetic-fallback-503","stale":True,"valid_time":"now","data_kind":"forecast"}}, cached_at=now, cached=False, stale=True)
         with self._lock:
             self._cache[key] = (now, field)
