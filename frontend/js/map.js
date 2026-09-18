@@ -438,7 +438,6 @@ const bilinearInterpolate = (grid, x, y, width, height) => {
          (v22 * fx * fy);
 };
 
-const renderSeaIce = (seaIce) => { seaIceLayer.clearLayers(); };
 
 
 
@@ -469,7 +468,6 @@ const renderSeaIce = (seaIce) => { seaIceLayer.clearLayers(); };
     if (state && state.simulation_time !== undefined) lastSimulationTime = state.simulation_time;
     renderRoutes(state && state.routes);
     renderIcebergs(state && state.iceberg_states, state && state.iceberg_trajectories);
-    renderSeaIce(state && state.sea_ice_state);
     flushLabels();
   };
 
