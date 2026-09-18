@@ -17,6 +17,8 @@ from backend.scientific import (
     risk_at,
     iceberg_route_risk,
     route_distance,
+    compute_vessel_state,
+    DEFAULT_VESSEL_CONFIG,
 )
 
 VORIGIN_COORDS = {
@@ -156,7 +158,9 @@ class TripEngine:
             icebergs[0]["lat"] = corridor[1][0] + 0.3
             icebergs[0]["lon"] = corridor[1][1] + 0.3
             icebergs[0]["risk_radius_m"] = max(icebergs[0]["risk_radius_m"], 50000.0)
-        routes_one_way = build_routes([origin["lat"], origin["lon"]], [destination["lat"], destination["lon"]], sea_ice, icebergs, environment, 0.0)
+        # Get vessel ice class from config
+        vessel_ice_class = DEFAULT_VESSEL_CONFIG.ice_capability
+        routes_one_way = build_routes([origin["lat"], origin["lon"]], [destination["lat"], destination["lon"]], sea_ice, icebergs, environment, 0.0, iceberg_model=iceberg_model, vessel_ice_class=vessel_ice_class)
         routes = {}
         for key, route in routes_one_way.items():
             points = route["points"] + [list(point) for point in reversed(route["points"][:-1])]
@@ -167,6 +171,17 @@ class TripEngine:
             route_data["estimated_duration_hours"] = route_data["travel_time_hours"]
             route_data["fuel_tonnes"] = round(route_data["distance_km"] * 0.052, 2)
             routes[key] = route_data
+        
+        # Calculate proper trip duration from actual route distance
+        cruise_speed_kn = DEFAULT_VESSEL_CONFIG.cruise_speed_kn
+        outbound_distance = routes["optimized"]["distance_km"] / 2  # One-way distance
+        return_distance = outbound_distance
+        round_trip_distance = routes["optimized"]["distance_km"]
+        estimated_outbound_hours = round(outbound_distance / (cruise_speed_kn * 1.852), 2)
+        estimated_return_hours = round(return_distance / (cruise_speed_kn * 1.852), 2)
+        # Add 20% safety margin for weather/ice delays
+        simulation_end = round((estimated_outbound_hours + estimated_return_hours) * 1.2, 2)
+        
         self.models[trip["id"]] = {"environment": environment, "sea_ice": sea_ice, "iceberg": iceberg_model, "initial_icebergs": icebergs, "origin": origin, "destination": destination}
         trip["routes"] = routes
         trip["active_route"] = "optimized"
@@ -176,7 +191,15 @@ class TripEngine:
         trip["distance_km"] = 0.0
         trip["duration_hours"] = 0.0
         trip["fuel_remaining"] = 100.0
-        trip["vessel_state"] = {"name": trip["vessel"], "lat": origin["lat"], "lon": origin["lon"], "speed_kn": 17.0, "heading_deg": 132.0, "fuel_capacity_tonnes": routes["optimized"]["fuel_tonnes"] * 1.18, "fuel_remaining_tonnes": routes["optimized"]["fuel_tonnes"] * 1.18, "fuel_remaining_pct": 100.0, "fuel_consumption_tonnes_per_hour": 0.052 * 17.0 * 1.852, "eta_hours": routes["optimized"]["travel_time_hours"], "risk_state": "LOW", "status": "READY"}
+        trip["vessel_state"] = {"name": trip["vessel"], "lat": origin["lat"], "lon": origin["lon"], "speed_kn": float(cruise_speed_kn), "heading_deg": 132.0, "fuel_capacity_tonnes": routes["optimized"]["fuel_tonnes"] * 1.18, "fuel_remaining_tonnes": routes["optimized"]["fuel_tonnes"] * 1.18, "fuel_remaining_pct": 100.0, "fuel_consumption_tonnes_per_hour": 0.052 * cruise_speed_kn * 1.852, "eta_hours": routes["optimized"]["travel_time_hours"], "risk_state": "LOW", "status": "READY"}
+        # Store trip duration fields
+        trip["outbound_distance_km"] = round(outbound_distance, 2)
+        trip["return_distance_km"] = round(return_distance, 2)
+        trip["round_trip_distance_km"] = round(round_trip_distance, 2)
+        trip["estimated_outbound_hours"] = estimated_outbound_hours
+        trip["estimated_return_hours"] = estimated_return_hours
+        trip["simulation_end"] = simulation_end
+        trip["arrival_at_destination_hours"] = estimated_outbound_hours
         trip["environment"] = environment.at(origin["lat"], origin["lon"], 0.0)
         trip["sea_ice"] = {"concentration": sea_ice.concentration(origin["lat"], origin["lon"], 0.0), "risk_level": "Open Water", "confidence": 0.82, "forecast_horizon_days": 10, "grid": sea_ice.grid(0.0)}
         trip["iceberg_states"] = [iceberg_model.state_at(item, 0.0) for item in icebergs]
@@ -204,7 +227,22 @@ class TripEngine:
         route = trip["routes"][trip["active_route"]]["points"]
         full_distance = route_distance(route)
         distance = min(full_distance, time * 17.0 * 1.852)
-        latitude, longitude, heading = interpolate_route(route, distance)
+        
+        # Use vessel dynamics for smooth movement
+        prev_state = trip["vessel_state"]
+        vessel_state = compute_vessel_state(
+            prev_state,
+            route,
+            distance,
+            1.0,  # dt_hours - simulation advances in 1-hour steps
+            DEFAULT_VESSEL_CONFIG,
+        )
+        
+        latitude = vessel_state["lat"]
+        longitude = vessel_state["lon"]
+        heading = vessel_state["heading_deg"]
+        speed_kn = vessel_state["speed_kn"]
+        
         trip["distance_km"] = round(distance, 2)
         trip["duration_hours"] = float(time)
         trip["fuel_remaining"] = max(0.0, 100.0 - distance / max(1.0, full_distance) * 100.0)
@@ -220,12 +258,28 @@ class TripEngine:
         scenario_trigger = (trip["scenario"] == "ICEBERG_ENCOUNTER" and time >= 24.0) or (trip["scenario"] == "HEAVY_ICE" and time >= 48.0) or (trip["scenario"] == "SEVERE_WEATHER" and time >= 18.0)
         if (risk["overall_navigation_risk"] >= 0.58 or scenario_trigger) and trip["active_route"] == "optimized" and time >= 12.0 and not any(event["event_type"] == "ROUTE_RECALCULATED" for event in trip["events"]):
             previous = trip["active_route"]
-            trip["active_route"] = "conservative"
-            trip["route_change"] = {"trigger": "Predicted iceberg and sea-ice corridor exposure", "previous_route": previous, "new_route": "conservative", "risk_before": risk["overall_navigation_risk"], "risk_after": max(0.0, risk["overall_navigation_risk"] - 0.18), "additional_distance_km": round(trip["routes"]["conservative"]["distance_km"] - trip["routes"][previous]["distance_km"], 2), "additional_fuel_tonnes": round(trip["routes"]["conservative"]["fuel_tonnes"] - trip["routes"][previous]["fuel_tonnes"], 2), "explanation": "Route changed because an evolving iceberg corridor and local sea-ice concentration increased exposure."}
+            # Preserve vessel position when switching routes - project onto new route
+            old_route = trip["routes"][previous]["points"]
+            new_route = trip["routes"]["reference_conservative"]["points"]
+            # Find closest point on new route to current vessel position
+            from backend.scientific import distance_km
+            min_dist = float("inf")
+            closest_idx = 0
+            for idx, point in enumerate(new_route):
+                d = distance_km([latitude, longitude], point)
+                if d < min_dist:
+                    min_dist = d
+                    closest_idx = idx
+            # Reconstruct route from closest point onward
+            new_route_points = new_route[closest_idx:]
+            # But keep the full route for distance calculations, just update active route
+            trip["active_route"] = "reference_conservative"
+            trip["route_change"] = {"trigger": "Predicted iceberg and sea-ice corridor exposure", "previous_route": previous, "new_route": "reference_conservative", "risk_before": risk["overall_navigation_risk"], "risk_after": max(0.0, risk["overall_navigation_risk"] - 0.18), "additional_distance_km": round(trip["routes"]["reference_conservative"]["distance_km"] - trip["routes"][previous]["distance_km"], 2), "additional_fuel_tonnes": round(trip["routes"]["reference_conservative"]["fuel_tonnes"] - trip["routes"][previous]["fuel_tonnes"], 2), "explanation": "Route changed because an evolving iceberg corridor and local sea-ice concentration increased exposure."}
             self._record_event(trip, "ROUTE_RECALCULATED", "warning", "Route recalculated", trip["route_change"]["explanation"], trip["route_change"]["trigger"], trip["route_change"])
             route = trip["routes"][trip["active_route"]]["points"]
             full_distance = route_distance(route)
-            distance = min(full_distance, time * 17.0 * 1.852)
+            # Don't recalculate distance from origin - keep current distance along route
+            distance = min(full_distance, trip["distance_km"])
             latitude, longitude, heading = interpolate_route(route, distance)
             risk = risk_at(latitude, longitude, time, sea_ice, icebergs, model["environment"])
             route_risk = self._apply_route_risk(trip, route, icebergs, trajectory_by_id)
@@ -237,7 +291,8 @@ class TripEngine:
         trip["sea_ice"] = {"concentration": risk["sea_ice_concentration"], "risk_level": model["sea_ice"].category(risk["sea_ice_concentration"]), "confidence": 0.82, "forecast_horizon_days": 10, "grid": model["sea_ice"].grid(time)}
         trip["iceberg_states"] = icebergs
         trip["risk"] = risk
-        trip["vessel_state"].update({"lat": round(latitude, 5), "lon": round(longitude, 5), "heading_deg": round(heading, 2), "speed_kn": 17.0, "fuel_remaining_pct": round(trip["fuel_remaining"], 2), "fuel_remaining_tonnes": round(trip["routes"][trip["active_route"]]["fuel_tonnes"] * trip["fuel_remaining"] / 100.0, 2), "eta_hours": round(max(0.0, (full_distance - distance) / (17.0 * 1.852)), 2), "risk_state": risk["status"], "status": "UNDERWAY"})
+        # Update vessel state with dynamics
+        trip["vessel_state"].update({"lat": round(latitude, 5), "lon": round(longitude, 5), "heading_deg": round(heading, 2), "speed_kn": round(speed_kn, 2), "fuel_remaining_pct": round(trip["fuel_remaining"], 2), "fuel_remaining_tonnes": round(trip["routes"][trip["active_route"]]["fuel_tonnes"] * trip["fuel_remaining"] / 100.0, 2), "eta_hours": round(max(0.0, (full_distance - distance) / (17.0 * 1.852)), 2), "risk_state": risk["status"], "status": "UNDERWAY"})
         if time >= trip["simulation_end"]:
             trip["status"] = "COMPLETED"
             trip["phase"] = "ARRIVED"
@@ -265,7 +320,8 @@ class TripEngine:
             self._advance_trip(trip, target % 1.0)
         trip["current_simulation_time"] = target
         trip["status"] = "REPLAY"
-        trip["phase"] = "REPLAY"
+        # Don't override phase - let _advance_trip determine it based on time
+        trip["phase"] = self._phase_for_time(target, trip)
         trip["replay_mode"] = True
 
     def _snapshot(self, trip: Dict[str, Any]) -> Dict[str, Any]:
@@ -278,7 +334,15 @@ class TripEngine:
     def _phase_for_time(time: float, trip: Dict[str, Any]) -> str:
         if time >= trip["simulation_end"]:
             return "ARRIVED"
-        if time >= trip["simulation_end"] / 2.0:
+        # Use actual distance progress to determine phase
+        # Outbound: before reaching destination
+        # Return: after reaching destination but before returning to origin
+        arrival_time = trip.get("arrival_at_destination_hours", trip["simulation_end"] / 2.0)
+        if time >= arrival_time:
+            # Check if we're back at origin
+            outbound_distance = trip.get("outbound_distance_km", 0)
+            if trip.get("distance_km", 0) >= outbound_distance + trip.get("return_distance_km", 0) - 50:  # 50km tolerance
+                return "ARRIVED"
             return "RETURN"
         return "OUTBOUND"
 

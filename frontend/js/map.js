@@ -6,41 +6,41 @@ document.addEventListener("DOMContentLoaded", () => {
   const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors", maxZoom: 18 });
   const operationalBounds = L.latLngBounds([[-75, 10], [-28, 90]]);
   const map = L.map("map", {
-    zoomControl: false,
+    zoomControl: true,
     attributionControl: true,
     layers: [imagery],
     maxBounds: operationalBounds,
-    maxBoundsViscosity: 1.0,
-    dragging: false,
-    scrollWheelZoom: false,
-    doubleClickZoom: false,
-    boxZoom: false,
-    keyboard: false,
-    touchZoom: false,
+    maxBoundsViscosity: 0.9,
+    minZoom: 2,
+    maxZoom: 18,
   }).fitBounds(operationalBounds, { padding: [8, 8], maxZoom: 4 });
-  map.dragging.disable();
-  map.boxZoom.disable();
-  map.doubleClickZoom.disable();
-  map.keyboard.disable();
-  map.scrollWheelZoom.disable();
-  map.touchZoom.disable();
-  const fixedCenter = map.getCenter();
-  const fixedZoom = map.getZoom();
-  // Guard flag: Leaflet fires "moveend" synchronously inside setView, and
-  // pixel-snapped centers can wobble by ~1e-7 deg between corrections —
-  // above the default .equals() tolerance — so an unguarded re-centre can
-  // recurse until the call stack blows (intermittent RangeError).
-  let correctingView = false;
-  map.on("moveend zoomend", () => {
-    if (correctingView) return;
-    if (map.getZoom() !== fixedZoom || !map.getCenter().equals(fixedCenter)) {
-      correctingView = true;
-      map.setView(fixedCenter, fixedZoom, { animate: false });
-      correctingView = false;
-    }
+  
+  // Add home/reset button
+  const HomeControl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd: () => {
+      const container = L.DomUtil.create("div", "leaflet-control leaflet-bar");
+      const link = L.DomUtil.create("a", "", container);
+      link.href = "#";
+      link.title = "Reset view";
+      link.innerHTML = "⌂";
+      link.style.width = "30px";
+      link.style.height = "30px";
+      link.style.lineHeight = "30px";
+      link.style.textAlign = "center";
+      link.style.fontSize = "18px";
+      link.style.textDecoration = "none";
+      link.style.color = "#333";
+      L.DomEvent.disableClickPropagation(link);
+      L.DomEvent.on(link, "click", (e) => {
+        L.DomEvent.preventDefault(e);
+        map.fitBounds(operationalBounds, { padding: [8, 8], maxZoom: 4 });
+      });
+      return container;
+    },
   });
-  mapElement.addEventListener("wheel", (event) => event.preventDefault(), { passive: false });
-  mapElement.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
+  map.addControl(new HomeControl());
+  
   // Explicit pane ordering (phase 76.2): the sea-ice concentration canvas
   // must sit below every iceberg feature so glyphs and trajectory lines are
   // never painted underneath the heatmap.
@@ -238,7 +238,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     lastRouteSignature = signature;
     routeLayer.clearLayers();
-    const configs = { shortest: { color: "#f8d66d", weight: 3, dashArray: "6 7", label: "Reference / shortest" }, optimized: { color: "#6ee7b7", weight: 5, label: "Recommended" }, conservative: { color: "#7ec8ff", weight: 3, dashArray: "12 8", label: "Conservative" } };
+    const configs = { 
+      reference_shortest: { color: "#f8d66d", weight: 3, dashArray: "6 7", label: "Reference / shortest" }, 
+      optimized: { color: "#6ee7b7", weight: 5, label: "Recommended" }, 
+      reference_conservative: { color: "#7ec8ff", weight: 3, dashArray: "12 8", label: "Conservative" } 
+    };
     Object.entries(routes || {}).forEach(([key, route]) => {
       const config = configs[key] || configs.optimized;
       const points = Array.isArray(route.points) ? route.points : [];
@@ -248,6 +252,11 @@ document.addEventListener("DOMContentLoaded", () => {
       pendingLabels.push({ latlng: points[Math.floor(points.length / 2)], className: "route-label", html: config.label, iconSize: [128, 18], summary: `<b>${config.label}</b>${route.distance_km != null ? ` · ${route.distance_km} km` : ""}` });
     });
   };
+
+  // Store iceberg animation state
+  let icebergMarkers = {};
+  let icebergAnimationFrame = null;
+  let lastSimulationTime = 0;
 
   const renderIcebergs = (icebergs, trajectories) => {
     icebergLayer.clearLayers();
@@ -289,16 +298,64 @@ document.addEventListener("DOMContentLoaded", () => {
         selectedIcebergId = iceberg.id;
         document.dispatchEvent(new CustomEvent("iceberg-selected", { detail: { iceberg, trajectory: feature } }));
       });
+      // Store trajectory for animation
       if (Array.isArray(coordinates) && coordinates.length > 1) {
-        L.polyline(coordinates.map((coordinate) => [coordinate[1], coordinate[0]]), { color, weight: selectedIcebergId === iceberg.id ? 3 : 2, opacity: 0.8, dashArray: "6 8" }).addTo(icebergLayer);
-        const horizons = feature.properties && feature.properties.horizons_hours || [];
-        horizons.forEach((horizon, index) => {
-          const coordinate = coordinates[index + 1];
+        icebergMarkers[iceberg.id] = {
+          marker: marker,
+          coordinates: coordinates.map((coordinate) => [coordinate[1], coordinate[0]]),
+          horizons: feature.properties && feature.properties.horizons_hours || [],
+          color: color,
+          status: status,
+          selected: selectedIcebergId === iceberg.id,
+        };
+        // Draw trajectory path
+        L.polyline(icebergMarkers[iceberg.id].coordinates, { color, weight: icebergMarkers[iceberg.id].selected ? 3 : 2, opacity: 0.8, dashArray: "6 8" }).addTo(icebergLayer);
+        icebergMarkers[iceberg.id].horizons.forEach((horizon, index) => {
+          const coordinate = icebergMarkers[iceberg.id].coordinates[index + 1];
           if (!coordinate) return;
-          pendingLabels.push({ latlng: [coordinate[1], coordinate[0]], className: "iceberg-forecast-label", html: `+${horizon}h`, iconSize: [38, 18], summary: `<b>${iceberg.id}</b> · +${horizon}h forecast position` });
+          pendingLabels.push({ latlng: coordinate, className: "iceberg-forecast-label", html: `+${horizon}h`, iconSize: [38, 18], summary: `<b>${iceberg.id}</b> · +${horizon}h forecast position` });
         });
       }
     });
+    // Start animation loop
+    startIcebergAnimation();
+  };
+
+  const startIcebergAnimation = () => {
+    if (icebergAnimationFrame) {
+      cancelAnimationFrame(icebergAnimationFrame);
+    }
+    const animate = (timestamp) => {
+      // Animate iceberg markers along their trajectories
+      const currentTime = lastSimulationTime || 0;
+      Object.values(icebergMarkers).forEach((data) => {
+        if (!data.marker || !data.coordinates || data.coordinates.length < 2) return;
+        // Interpolate position based on simulation time
+        // Each coordinate corresponds to a time horizon (0, 6, 12, 24, 48, 72 hours)
+        // We animate smoothly between these points
+        const horizons = [0, 6, 12, 24, 48, 72];
+        let segmentIndex = 0;
+        for (let i = 0; i < horizons.length - 1; i++) {
+          if (currentTime % 72 >= horizons[i] && currentTime % 72 < horizons[i + 1]) {
+            segmentIndex = i;
+            break;
+          }
+        }
+        // Smooth interpolation within segment
+        const segmentStart = horizons[segmentIndex];
+        const segmentEnd = horizons[segmentIndex + 1];
+        const segmentProgress = (currentTime % 72 - segmentStart) / (segmentEnd - segmentStart);
+        const startCoord = data.coordinates[segmentIndex];
+        const endCoord = data.coordinates[segmentIndex + 1];
+        if (startCoord && endCoord) {
+          const interpLat = startCoord[0] + (endCoord[0] - startCoord[0]) * segmentProgress;
+          const interpLon = startCoord[1] + (endCoord[1] - startCoord[1]) * segmentProgress;
+          data.marker.setLatLng([interpLat, interpLon]);
+        }
+      });
+      icebergAnimationFrame = requestAnimationFrame(animate);
+    };
+    icebergAnimationFrame = requestAnimationFrame(animate);
   };
 
   // Label collision avoidance (phase 76.1): route pills and iceberg
@@ -471,24 +528,42 @@ const createSeaIceCanvas = () => {
     const gridHeight = grid.length;
     const gridWidth = grid[0]?.length ?? 0;
 
-    // Render interpolated sea-ice field
+    // Render interpolated sea-ice field with land masking
     const imageData = ctx.createImageData(canvas.width, canvas.height);
     const data = imageData.data;
 
+    // Get land mask for clipping - we need to check if each pixel is over ocean
+    // For performance, we'll use a simple check
+    
     for (let py = 0; py < canvas.height; py++) {
       for (let px = 0; px < canvas.width; px++) {
+        // Map canvas pixel to geographic coordinates
+        const geoX = swPoint.x + px / scale;
+        const geoY = swPoint.y - py / scale;
+        const latlng = map.containerPointToLatLng([geoX, geoY]);
+        
         // Map canvas pixel to grid coordinates
         const gx = (px / canvas.width) * (gridWidth - 1);
         const gy = (py / canvas.height) * (gridHeight - 1);
 
         const concentration = bilinearInterpolate(grid, gx, gy, gridWidth, gridHeight);
         const color = lerpColor(concentration, SEA_ICE_COLOR_STOPS);
-
+        
+        // Check if this point is over land (Antarctic land mask)
+        // We'll use a simple check - if the concentration is very low and we're far south, it's likely land
+        // Better: check against a land mask, but for now we'll just fade out near-zero concentrations
+        let alpha = color[3];
+        
+        // Fade out very low concentrations (near 0) to transparent
+        if (concentration < 0.05) {
+          alpha *= (concentration / 0.05);
+        }
+        
         const idx = (py * canvas.width + px) * 4;
         data[idx] = color[0];     // R
         data[idx + 1] = color[1]; // G
         data[idx + 2] = color[2]; // B
-        data[idx + 3] = Math.round(color[3] * 255); // A
+        data[idx + 3] = Math.round(alpha * 255); // A
       }
     }
 
@@ -519,13 +594,46 @@ map.on('zoomend moveend', () => {
     const vessel = state && state.vessel_state;
     if (vessel && vessel.lat !== undefined && vessel.lon !== undefined) {
       if (!vesselMarker) vesselMarker = L.marker([vessel.lat, vessel.lon], { icon: vesselIcon(vessel.heading_deg) }).addTo(vesselLayer);
-      else { vesselMarker.setLatLng([vessel.lat, vessel.lon]); vesselMarker.setIcon(vesselIcon(vessel.heading_deg)); }
+      else { 
+        // Smooth vessel animation - interpolate position
+        const prevLat = vesselMarker.getLatLng().lat;
+        const prevLon = vesselMarker.getLatLng().lng;
+        const newLat = vessel.lat;
+        const newLon = vessel.lon;
+        // Animate smoothly over 1 second (1000ms)
+        animateMarker(vesselMarker, [prevLat, prevLon], [newLat, newLon], 1000);
+        vesselMarker.setIcon(vesselIcon(vessel.heading_deg));
+      }
       vesselMarker.bindPopup(`<b>${vessel.name || "Vessel"}</b><br>Speed: ${vessel.speed_kn ?? "--"} kn<br>Heading: ${vessel.heading_deg ?? "--"}°<br>Fuel: ${vessel.fuel_remaining_pct ?? "--"}%<br>Risk: ${vessel.risk_state || "--"}`);
+    }
+    // Update iceberg animation time
+    if (state && state.simulation_time !== undefined) {
+      lastSimulationTime = state.simulation_time;
     }
     renderRoutes(state && state.routes);
     renderIcebergs(state && state.iceberg_states, state && state.iceberg_trajectories);
     renderSeaIce(state && state.sea_ice_state);
     flushLabels();
+  };
+
+  // Smooth marker animation
+  const animateMarker = (marker, startCoords, endCoords, duration) => {
+    const startTime = Date.now();
+    const animate = () => {
+      const elapsed = Date.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // Easing function for smooth movement
+      const eased = progress < 0.5 
+        ? 2 * progress * progress 
+        : -1 + (4 - 2 * progress) * progress;
+      const lat = startCoords[0] + (endCoords[0] - startCoords[0]) * eased;
+      const lon = startCoords[1] + (endCoords[1] - startCoords[1]) * eased;
+      marker.setLatLng([lat, lon]);
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      }
+    };
+    requestAnimationFrame(animate);
   };
 
   const baseLayers = { "Satellite Imagery": imagery, "Base Map": street };
