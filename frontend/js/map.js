@@ -458,9 +458,25 @@ const renderSeaIce = (seaIce) => { seaIceLayer.clearLayers(); };
   createLegendControl();
   // Other modules (glaciers.js) may register their own overlay groups and
   // query the vessel position for proximity readouts.
+
+  const updateState = (state) => {
+    const vessel = state && state.vessel_state;
+    if (vessel && vessel.lat !== undefined && vessel.lon !== undefined) {
+      if (!vesselMarker) vesselMarker = L.marker([vessel.lat, vessel.lon], { icon: vesselIcon(vessel.heading_deg) }).addTo(vesselLayer);
+      else { vesselMarker.setLatLng([vessel.lat, vessel.lon]); vesselMarker.setIcon(vesselIcon(vessel.heading_deg)); }
+      vesselMarker.bindPopup(`<b>${vessel.name || "Vessel"}</b><br>Speed: ${vessel.speed_kn ?? "--"} kn<br>Heading: ${vessel.heading_deg ?? "--"}°<br>Fuel: ${vessel.fuel_remaining_pct ?? "--"}%<br>Risk: ${vessel.risk_state || "--"}`);
+    }
+    if (state && state.simulation_time !== undefined) lastSimulationTime = state.simulation_time;
+    renderRoutes(state && state.routes);
+    renderIcebergs(state && state.iceberg_states, state && state.iceberg_trajectories);
+    renderSeaIce(state && state.sea_ice_state);
+    flushLabels();
+  };
+
+  window.updateState = updateState;
   window.mapController = {
     map,
-    updateState,
+    updateState: updateState,
     registerOverlay: (name, layer) => layersControl.addOverlay(layer, name),
     getVesselPosition: () => vesselMarker && vesselMarker.getLatLng(),
   };
