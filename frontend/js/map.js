@@ -438,182 +438,18 @@ const bilinearInterpolate = (grid, x, y, width, height) => {
          (v22 * fx * fy);
 };
 
-const renderSeaIce = (seaIce) => {
-    seaIceLayer.clearLayers();
-    if (!seaIce || !Array.isArray(seaIce.grid)) return;
+const renderSeaIce = (seaIce) => { seaIceLayer.clearLayers(); };
 
-    // Extract grid data into a 2D array for interpolation
-    const cells = seaIce.grid;
-    if (cells.length === 0) return;
 
-    // Determine grid bounds and resolution
-    const lats = cells.map(c => c.center[0]).sort((a, b) => a - b);
-    const lons = cells.map(c => c.center[1]).sort((a, b) => a - b);
-    const uniqueLats = [...new Set(lats.map(l => Math.round(l * 100) / 100))].sort((a, b) => a - b);
-    const uniqueLons = [...new Set(lons.map(l => Math.round(l * 100) / 100))].sort((a, b) => a - b);
 
-    const latStep = uniqueLats.length > 1 ? uniqueLats[1] - uniqueLats[0] : 4.0;
-    const lonStep = uniqueLons.length > 1 ? uniqueLons[1] - uniqueLons[0] : 4.0;
-
-    // Create 2D concentration grid
-    const gridWidth = uniqueLons.length;
-    const gridHeight = uniqueLats.length;
-    const concentrationGrid = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(0));
-
-    cells.forEach(cell => {
-      if (!cell.center) return;
-      const latIdx = uniqueLats.findIndex(l => Math.abs(l - cell.center[0]) < latStep / 2);
-      const lonIdx = uniqueLons.findIndex(l => Math.abs(l - cell.center[1]) < lonStep / 2);
-      if (latIdx >= 0 && lonIdx >= 0) {
-        concentrationGrid[latIdx][lonIdx] = cell.concentration ?? 0;
-      }
-    });
-
-    // Store for canvas rendering
-    seaIceData = {
-      grid: concentrationGrid,
-      bounds: {
-        south: uniqueLats[0] - latStep / 2,
-        north: uniqueLats[uniqueLats.length - 1] + latStep / 2,
-        west: uniqueLons[0] - lonStep / 2,
-        east: uniqueLons[uniqueLons.length - 1] + lonStep / 2,
-      },
-      latStep,
-      lonStep,
-      uniqueLats,
-      uniqueLons,
-    };
-
-    seaIceBounds = [
-      [seaIceData.bounds.south, seaIceData.bounds.west],
-      [seaIceData.bounds.north, seaIceData.bounds.east],
-    ];
-
-    // Create or update canvas overlay
-    createSeaIceCanvas();
-  };
-
-const createSeaIceCanvas = () => {
-    if (!seaIceData) return;
-
-    // Remove existing canvas if any
-    if (seaIceCanvas) {
-      map.removeLayer(seaIceCanvas);
-      seaIceCanvas = null;
-    }
-
-    // Create canvas element
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-
-    // Calculate canvas size based on map view - use higher resolution for smoother rendering
-    const bounds = seaIceData.bounds;
-    const mapSize = map.getSize();
-    const swPoint = map.latLngToContainerPoint([bounds.south, bounds.west]);
-    const nePoint = map.latLngToContainerPoint([bounds.north, bounds.east]);
-    const canvasWidth = Math.abs(nePoint.x - swPoint.x);
-    const canvasHeight = Math.abs(swPoint.y - nePoint.y);
-
-    // Use a reasonable resolution (max 512px on longest side for performance)
-    const maxDim = Math.max(canvasWidth, canvasHeight);
-    const scale = maxDim > 512 ? 512 / maxDim : 1;
-    canvas.width = Math.round(canvasWidth * scale);
-    canvas.height = Math.round(canvasHeight * scale);
-
-    const grid = seaIceData.grid;
-    const gridHeight = grid.length;
-    const gridWidth = grid[0]?.length ?? 0;
-
-    // Render with land-aware masking: fade near-zero (open water / land) and clip to bounds
-    const imageData = ctx.createImageData(canvas.width, canvas.height);
-    const data = imageData.data;
-    for (let py = 0; py < canvas.height; py++) {
-      for (let px = 0; px < canvas.width; px++) {
-        const gx = (px / canvas.width) * (gridWidth - 1);
-        const gy = (py / canvas.height) * (gridHeight - 1);
-        const concentration = bilinearInterpolate(grid, gx, gy, gridWidth, gridHeight);
-        const color = lerpColor(concentration, SEA_ICE_COLOR_STOPS);
-
-        // Mask: fade very low concentration (open water / possible land) and enforce bounds
-        let alpha = color[3];
-        if (concentration < 0.05) alpha = 0;  // transparent over land / open water
-        if (concentration > 0.95) alpha = Math.min(0.95, alpha); // prevent solid white blob
-
-        const idx = (py * canvas.width + px) * 4;
-        data[idx] = color[0];
-        data[idx + 1] = color[1];
-        data[idx + 2] = color[2];
-        data[idx + 3] = Math.round(alpha * 255);
-      }
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-
-    // Create Leaflet ImageOverlay on the dedicated low z-index pane so it
-    // renders beneath iceberg trajectories, risk zones, and glyph markers
-    seaIceCanvas = L.imageOverlay(canvas.toDataURL(), seaIceBounds, {
-      opacity: 0.85,
-      interactive: false,
-      attribution: '',
-      pane: "sea-ice-pane",
-    }).addTo(seaIceLayer);
-  };
-
-// Re-render sea ice on zoom/pan for crisp interpolation
-map.on('zoomend moveend', () => {
-    if (seaIceData) {
-      createSeaIceCanvas();
+  // Legend moves when right-side tab is hidden via arrow
+  document.addEventListener("panel-toggled", (e) => {
+    const legend = document.querySelector(".map-legend");
+    if (legend) {
+      legend.style.transform = e.detail.hidden ? "translateX(-40px) scale(0.85)" : "translateX(0) scale(1)";
+      legend.style.transition = "transform 0.35s ease";
     }
   });
-
-  map.on("click", (event) => {
-    if (windEnabled && windField) showWindInspector(event.latlng);
-  });
-
-  const updateState = (state) => {
-    const vessel = state && state.vessel_state;
-    if (vessel && vessel.lat !== undefined && vessel.lon !== undefined) {
-      if (!vesselMarker) vesselMarker = L.marker([vessel.lat, vessel.lon], { icon: vesselIcon(vessel.heading_deg) }).addTo(vesselLayer);
-      else { 
-        // Smooth vessel animation - interpolate position
-        const prevLat = vesselMarker.getLatLng().lat;
-        const prevLon = vesselMarker.getLatLng().lng;
-        const newLat = vessel.lat;
-        const newLon = vessel.lon;
-        // Animate smoothly over 1 second (1000ms)
-        animateMarker(vesselMarker, [prevLat, prevLon], [newLat, newLon], 1000);
-        vesselMarker.setIcon(vesselIcon(vessel.heading_deg));
-      }
-      vesselMarker.bindPopup(`<b>${vessel.name || "Vessel"}</b><br>Speed: ${vessel.speed_kn ?? "--"} kn<br>Heading: ${vessel.heading_deg ?? "--"}°<br>Fuel: ${vessel.fuel_remaining_pct ?? "--"}%<br>Risk: ${vessel.risk_state || "--"}`);
-    }
-    // Update iceberg animation time
-    if (state && state.simulation_time !== undefined) {
-      lastSimulationTime = state.simulation_time;
-    }
-    renderRoutes(state && state.routes);
-    renderIcebergs(state && state.iceberg_states, state && state.iceberg_trajectories);
-    flushLabels();
-  };
-
-  // Smooth marker animation
-  const animateMarker = (marker, startCoords, endCoords, duration) => {
-    const startTime = Date.now();
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      // Easing function for smooth movement
-      const eased = progress < 0.5 
-        ? 2 * progress * progress 
-        : -1 + (4 - 2 * progress) * progress;
-      const lat = startCoords[0] + (endCoords[0] - startCoords[0]) * eased;
-      const lon = startCoords[1] + (endCoords[1] - startCoords[1]) * eased;
-      marker.setLatLng([lat, lon]);
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      }
-    };
-    requestAnimationFrame(animate);
-  };
 
   const baseLayers = { "Satellite Imagery": imagery, "Base Map": street };
   const overlays = { "Recommended / routes": routeLayer, "Icebergs": icebergLayer, /* sea-ice removed */ "Vessel": vesselLayer, "Risk zones": riskLayer, "Labels": labelLayer };
