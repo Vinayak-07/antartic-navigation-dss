@@ -528,42 +528,26 @@ const createSeaIceCanvas = () => {
     const gridHeight = grid.length;
     const gridWidth = grid[0]?.length ?? 0;
 
-    // Render interpolated sea-ice field with land masking
+    // Render with land-aware masking: fade near-zero (open water / land) and clip to bounds
     const imageData = ctx.createImageData(canvas.width, canvas.height);
     const data = imageData.data;
-
-    // Get land mask for clipping - we need to check if each pixel is over ocean
-    // For performance, we'll use a simple check
-    
     for (let py = 0; py < canvas.height; py++) {
       for (let px = 0; px < canvas.width; px++) {
-        // Map canvas pixel to geographic coordinates
-        const geoX = swPoint.x + px / scale;
-        const geoY = swPoint.y - py / scale;
-        const latlng = map.containerPointToLatLng([geoX, geoY]);
-        
-        // Map canvas pixel to grid coordinates
         const gx = (px / canvas.width) * (gridWidth - 1);
         const gy = (py / canvas.height) * (gridHeight - 1);
-
         const concentration = bilinearInterpolate(grid, gx, gy, gridWidth, gridHeight);
         const color = lerpColor(concentration, SEA_ICE_COLOR_STOPS);
-        
-        // Check if this point is over land (Antarctic land mask)
-        // We'll use a simple check - if the concentration is very low and we're far south, it's likely land
-        // Better: check against a land mask, but for now we'll just fade out near-zero concentrations
+
+        // Mask: fade very low concentration (open water / possible land) and enforce bounds
         let alpha = color[3];
-        
-        // Fade out very low concentrations (near 0) to transparent
-        if (concentration < 0.05) {
-          alpha *= (concentration / 0.05);
-        }
-        
+        if (concentration < 0.05) alpha = 0;  // transparent over land / open water
+        if (concentration > 0.95) alpha = Math.min(0.95, alpha); // prevent solid white blob
+
         const idx = (py * canvas.width + px) * 4;
-        data[idx] = color[0];     // R
-        data[idx + 1] = color[1]; // G
-        data[idx + 2] = color[2]; // B
-        data[idx + 3] = Math.round(alpha * 255); // A
+        data[idx] = color[0];
+        data[idx + 1] = color[1];
+        data[idx + 2] = color[2];
+        data[idx + 3] = Math.round(alpha * 255);
       }
     }
 

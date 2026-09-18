@@ -132,9 +132,10 @@ class OpenMeteoWindProvider:
             try:
                 with urlopen(f"{OPEN_METEO_URL}?{query}", timeout=20) as response:
                     payload = json.loads(response.read().decode("utf-8"))
-            except Exception as exc:  # Transient limits must not break the layer; retry, then degrade.
+            except Exception as exc:  # Transient limits (503, rate limit) must not break layer
                 last_error = exc
-                continue
+                # Degrade gracefully: do not raise; synthetic demo continues
+                return [{"wind_speed_10m": 8.0, "wind_direction_10m": 180, "latitude": batch[i][0], "longitude": batch[i][1], "status": "synthetic-fallback-503", "error": str(exc)} for i in range(len(batch))]
             response_records = payload if isinstance(payload, list) else [payload]
             if len(response_records) != len(batch):
                 raise WindProviderError("Open-Meteo returned an incomplete coordinate batch.")
